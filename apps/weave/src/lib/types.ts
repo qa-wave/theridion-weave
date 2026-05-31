@@ -57,6 +57,8 @@ export interface TestResult {
   evidence?: string;
   /** Failure message or notes */
   notes?: string;
+  /** GitHub / Jira / Linear issue URL for a failed test (defect linking) */
+  issueUrl?: string;
 }
 
 export interface TestRun {
@@ -72,6 +74,8 @@ export interface TestRun {
   suiteName?: string;
   /** Branch or environment label */
   label?: string;
+  /** Optional milestone tag (e.g. "v2.4.0") for aggregation grouping */
+  milestone?: string;
 }
 
 // ─── Ingest payload (mirrors what Runner publishes to Hub) ────────────────────
@@ -118,5 +122,32 @@ export interface CoverageSummary {
   active: number;
   covered: number;
   /** percentage of active test cases that have a passing run */
+  coveragePct: number;
+}
+
+// ─── Requirements ─────────────────────────────────────────────────────────────
+
+export type RequirementStatus = "open" | "in_progress" | "done" | "deprecated";
+export type RequirementPriority = "low" | "medium" | "high" | "critical";
+
+export interface Requirement {
+  id: string;
+  title: string;
+  description: string;
+  status: RequirementStatus;
+  priority: RequirementPriority;
+  /** External tracker URL (Jira, Linear, GitHub issue…) */
+  externalUrl?: string;
+  /** Test case IDs linked to this requirement */
+  caseIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** One row of the coverage matrix: requirement + how many of its cases pass */
+export interface RequirementCoverageRow {
+  requirement: Requirement;
+  totalCases: number;
+  coveredCases: number;
   coveragePct: number;
 }

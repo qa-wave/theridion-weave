@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { Plus, Download } from "lucide-react";
 import { listTestRuns } from "@/data/store";
 import { summariseRun } from "@/lib/utils";
 import { Card, PageHeader, ResultBadge, SourceBadge } from "@/components/ui";
@@ -23,12 +23,21 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
         title="Běhy"
         description="Sloučený pohled na manuální běhy a automatizované výsledky z Eyes (FE) a Net (BE)."
         action={
-          <Link
-            href="/runs/new"
-            className="flex items-center gap-2 rounded-lg bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white hover:opacity-90"
-          >
-            <Plus size={16} /> Nový běh
-          </Link>
+          <div className="flex items-center gap-2">
+            <a
+              href={`/api/runs/export${source ? `?source=${source}` : ""}`}
+              className="flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-sm hover:bg-[var(--surface-2)]"
+              download
+            >
+              <Download size={14} /> CSV
+            </a>
+            <Link
+              href="/runs/new"
+              className="flex items-center gap-2 rounded-lg bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white hover:opacity-90"
+            >
+              <Plus size={16} /> Nový běh
+            </Link>
+          </div>
         }
       />
 
@@ -89,6 +98,11 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
                       {r.evidence && (
                         <a href={r.evidence} className="text-[var(--accent)] hover:underline" target="_blank" rel="noreferrer">
                           evidence
+                        </a>
+                      )}
+                      {r.issueUrl && (
+                        <a href={r.issueUrl} className="text-red-400 hover:underline" target="_blank" rel="noreferrer">
+                          issue
                         </a>
                       )}
                       <ResultBadge status={r.status} />

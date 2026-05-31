@@ -9,6 +9,8 @@ import { randomUUID } from "node:crypto";
 import { neon } from "@neondatabase/serverless";
 import type {
   CoverageSummary,
+  Requirement,
+  RequirementCoverageRow,
   RunSource,
   RunSummary,
   TestCase,
@@ -16,11 +18,13 @@ import type {
   TestRun,
 } from "@/lib/types";
 import type {
+  CreateRequirementInput,
   CreateRunFromPlanInput,
   CreateTestCaseInput,
   CreateTestPlanInput,
   CreateTestRunInput,
   RunnerIngestInput,
+  UpdateRequirementInput,
   UpdateTestCaseInput,
 } from "@/lib/validation";
 import { summariseRun } from "@/lib/utils";
@@ -85,6 +89,17 @@ export async function migrate(): Promise<void> {
     key text primary key,
     value jsonb not null
   )`;
+  await q`create table if not exists requirements (
+    id text primary key,
+    title text not null,
+    description text not null default '',
+    status text not null default 'open',
+    priority text not null default 'medium',
+    external_url text,
+    case_ids jsonb not null default '[]',
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`;
 }
 
 // ─── Generic key/value (settings) ─────────────────────────────────────────────
@@ -110,7 +125,7 @@ export async function kvSet<T>(key: string, value: T): Promise<void> {
 }
 
 /** Insert the demo dataset into Neon (idempotent — skips existing IDs). */
-export async function seedDatabase(): Promise<{ cases: number; plans: number; runs: number }> {
+export async function seedDatabase(): Promise<{ cases: number; plans: number; runs: number; requirements: number }> {
   const q = sql();
   const data = seed();
   for (const c of data.cases) {
@@ -133,10 +148,30 @@ export async function seedDatabase(): Promise<{ cases: number; plans: number; ru
               ${r.triggeredBy}, ${r.startedAt}, ${r.finishedAt}, ${JSON.stringify(r.results)})
       on conflict (id) do nothing`;
   }
-  return { cases: data.cases.length, plans: data.plans.length, runs: data.runs.length };
+  for (const req of data.requirements) {
+    await q`insert into requirements
+      (id, title, description, status, priority, external_url, case_ids, created_at, updated_at)
+      values (${req.id}, ${req.title}, ${req.description}, ${req.status}, ${req.priority},
+              ${req.externalUrl ?? null}, ${JSON.stringify(req.caseIds)}, ${req.createdAt}, ${req.updatedAt})
+      on conflict (id) do nothing`;
+  }
+  return { cases: data.cases.length, plans: data.plans.length, runs: data.runs.length, requirements: data.requirements.length };
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+function rowToRequirement(r: any): Requirement {
+  return {
+    id: r.id,
+    title: r.title,
+    description: r.description,
+    status: r.status,
+    priority: r.priority,
+    externalUrl: r.external_url ?? undefined,
+    caseIds: r.case_ids ?? [],
+    createdAt: new Date(r.created_at).toISOString(),
+    updatedAt: new Date(r.updated_at).toISOString(),
+  };
+}
 function rowToCase(r: any): TestCase {
   return {
     id: r.id,
@@ -185,6 +220,7 @@ interface Store {
   cases: TestCase[];
   plans: TestPlan[];
   runs: TestRun[];
+  requirements: Requirement[];
 }
 
 const DAY = 86_400_000;
@@ -354,16 +390,57 @@ function seed(): Store {
     },
   ];
 
-  return { cases, plans, runs };
+  const requirements: Requirement[] = [
+    {
+      id: "req-auth-001",
+      title: "Přihlášení platnými přihlašovacími údaji",
+      description: "Systém musí umožnit přihlášení uživatele platnými přihlašovacími údaji.",
+      status: "done",
+      priority: "critical",
+      externalUrl: undefined,
+      caseIds: ["tc-login-happy"],
+      createdAt: at(40),
+      updatedAt: at(5),
+    },
+    {
+      id: "req-auth-002",
+      title: "Ochrana účtu před hrubou silou",
+      description: "Po 5 neúspěšných pokusech musí být účet dočasně zablokován.",
+      status: "done",
+      priority: "high",
+      externalUrl: undefined,
+      caseIds: ["tc-login-locked"],
+      createdAt: at(38),
+      updatedAt: at(5),
+    },
+    {
+      id: "req-checkout-001",
+      title: "Podpora slevových kupónů",
+      description: "Platný kupón musí snížit cenu v košíku o správné procento.",
+      status: "in_progress",
+      priority: "medium",
+      externalUrl: undefined,
+      caseIds: ["tc-checkout-coupon"],
+      createdAt: at(30),
+      updatedAt: at(3),
+    },
+  ];
+
+  return { cases, plans, runs, requirements };
 }
 
 const g = globalThis as unknown as { __weaveStore?: Store };
-const mem: Store = g.__weaveStore ?? (g.__weaveStore = seed());
+function ensureRequirements(s: Store): Store {
+  if (!s.requirements) s.requirements = [];
+  return s;
+}
+const mem: Store = ensureRequirements(g.__weaveStore ?? (g.__weaveStore = seed()));
 
 /** Exported for the seed script — returns the canonical demo dataset. */
 export function seedData(): Store {
   return seed();
 }
+
 
 // ─── Test cases ───────────────────────────────────────────────────────────────
 
@@ -604,12 +681,14 @@ export async function createRunFromPlan(input: CreateRunFromPlanInput): Promise<
 export async function patchRunResult(
   runId: string,
   testId: string,
-  patch: { status: "pass" | "fail" | "skip" | "blocked"; notes?: string; evidence?: string },
+  patch: { status: "pass" | "fail" | "skip" | "blocked"; notes?: string; evidence?: string; issueUrl?: string },
 ): Promise<TestRun | null> {
   const run = await getTestRun(runId);
   if (!run) return null;
   const results = run.results.map((r) =>
-    r.testId === testId ? { ...r, status: patch.status, notes: patch.notes, evidence: patch.evidence || undefined } : r,
+    r.testId === testId
+      ? { ...r, status: patch.status, notes: patch.notes, evidence: patch.evidence || undefined, issueUrl: patch.issueUrl || r.issueUrl }
+      : r,
   );
   const allReviewed = results.every((r) => r.status !== "skip");
   const finishedAt = allReviewed ? (run.finishedAt ?? new Date().toISOString()) : null;
@@ -712,6 +791,195 @@ export async function totalsBySource(): Promise<SourceTotals[]> {
       skip: results.filter((r) => r.status === "skip").length,
       blocked: results.filter((r) => r.status === "blocked").length,
       total: results.length,
+    };
+  });
+}
+
+// ─── Aggregate API ────────────────────────────────────────────────────────────
+
+export interface AggregateBySource {
+  source: RunSource;
+  passRate: number;
+  pass: number;
+  fail: number;
+  skip: number;
+  blocked: number;
+  total: number;
+  runCount: number;
+}
+
+export interface AggregateByMilestone {
+  milestone: string;
+  passRate: number;
+  pass: number;
+  fail: number;
+  skip: number;
+  blocked: number;
+  total: number;
+  runCount: number;
+}
+
+export interface AggregateResult {
+  coverage: CoverageSummary;
+  bySource: AggregateBySource[];
+  byMilestone: AggregateByMilestone[];
+  generatedAt: string;
+}
+
+export async function aggregate(): Promise<AggregateResult> {
+  const [cov, allRuns] = await Promise.all([coverage(), listTestRuns()]);
+  const sources: RunSource[] = ["manual", "eyes", "net", "runner"];
+
+  const bySource: AggregateBySource[] = sources.map((source) => {
+    const sourceRuns = allRuns.filter((r) => r.source === source);
+    const results = sourceRuns.flatMap((r) => r.results);
+    const pass = results.filter((r) => r.status === "pass").length;
+    const fail = results.filter((r) => r.status === "fail").length;
+    const skip = results.filter((r) => r.status === "skip").length;
+    const blocked = results.filter((r) => r.status === "blocked").length;
+    const total = results.length;
+    return { source, passRate: total === 0 ? 100 : (pass / total) * 100, pass, fail, skip, blocked, total, runCount: sourceRuns.length };
+  });
+
+  // Group by milestone (label or suiteName or "unlabeled")
+  const milestoneMap = new Map<string, { pass: number; fail: number; skip: number; blocked: number; total: number; runs: number }>();
+  for (const run of allRuns) {
+    const key = run.milestone ?? run.label ?? "unlabeled";
+    const entry = milestoneMap.get(key) ?? { pass: 0, fail: 0, skip: 0, blocked: 0, total: 0, runs: 0 };
+    for (const r of run.results) {
+      entry[r.status] += 1;
+      entry.total += 1;
+    }
+    entry.runs += 1;
+    milestoneMap.set(key, entry);
+  }
+  const byMilestone: AggregateByMilestone[] = [...milestoneMap.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([milestone, s]) => ({
+      milestone,
+      passRate: s.total === 0 ? 100 : (s.pass / s.total) * 100,
+      pass: s.pass,
+      fail: s.fail,
+      skip: s.skip,
+      blocked: s.blocked,
+      total: s.total,
+      runCount: s.runs,
+    }));
+
+  return { coverage: cov, bySource, byMilestone, generatedAt: new Date().toISOString() };
+}
+
+// ─── Requirements ─────────────────────────────────────────────────────────────
+
+export async function listRequirements(): Promise<Requirement[]> {
+  if (USE_DB) {
+    const rows = (await sql()`select * from requirements order by updated_at desc`) as unknown[];
+    return rows.map(rowToRequirement);
+  }
+  return [...mem.requirements].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+export async function getRequirement(id: string): Promise<Requirement | undefined> {
+  if (USE_DB) {
+    const rows = (await sql()`select * from requirements where id = ${id}`) as unknown[];
+    return rows[0] ? rowToRequirement(rows[0]) : undefined;
+  }
+  return mem.requirements.find((r) => r.id === id);
+}
+
+export async function createRequirement(input: CreateRequirementInput): Promise<Requirement> {
+  const now = new Date().toISOString();
+  const req: Requirement = {
+    id: `req-${randomUUID().slice(0, 8)}`,
+    title: input.title,
+    description: input.description,
+    status: input.status,
+    priority: input.priority,
+    externalUrl: input.externalUrl,
+    caseIds: input.caseIds,
+    createdAt: now,
+    updatedAt: now,
+  };
+  if (USE_DB) {
+    await sql()`insert into requirements
+      (id, title, description, status, priority, external_url, case_ids, created_at, updated_at)
+      values (${req.id}, ${req.title}, ${req.description}, ${req.status}, ${req.priority},
+              ${req.externalUrl ?? null}, ${JSON.stringify(req.caseIds)}, ${req.createdAt}, ${req.updatedAt})`;
+  } else {
+    mem.requirements.push(req);
+  }
+  return req;
+}
+
+export async function updateRequirement(input: UpdateRequirementInput): Promise<Requirement | undefined> {
+  const existing = await getRequirement(input.id);
+  if (!existing) return undefined;
+  const next: Requirement = {
+    ...existing,
+    title: input.title ?? existing.title,
+    description: input.description ?? existing.description,
+    status: input.status ?? existing.status,
+    priority: input.priority ?? existing.priority,
+    externalUrl: "externalUrl" in input ? (input.externalUrl || undefined) : existing.externalUrl,
+    caseIds: input.caseIds ?? existing.caseIds,
+    updatedAt: new Date().toISOString(),
+  };
+  if (USE_DB) {
+    await sql()`update requirements set
+      title = ${next.title}, description = ${next.description}, status = ${next.status},
+      priority = ${next.priority}, external_url = ${next.externalUrl ?? null},
+      case_ids = ${JSON.stringify(next.caseIds)}, updated_at = ${next.updatedAt}
+      where id = ${next.id}`;
+  } else {
+    const i = mem.requirements.findIndex((r) => r.id === next.id);
+    if (i !== -1) mem.requirements[i] = next;
+  }
+  return next;
+}
+
+export async function deleteRequirement(id: string): Promise<boolean> {
+  if (USE_DB) {
+    const rows = (await sql()`delete from requirements where id = ${id} returning id`) as unknown[];
+    return rows.length > 0;
+  }
+  const i = mem.requirements.findIndex((r) => r.id === id);
+  if (i === -1) return false;
+  mem.requirements.splice(i, 1);
+  return true;
+}
+
+/** Build the coverage matrix: for each requirement, how many of its cases pass. */
+export async function requirementCoverageMatrix(): Promise<RequirementCoverageRow[]> {
+  const [reqs, allRuns, allCases] = await Promise.all([listRequirements(), listTestRuns(), listTestCases()]);
+
+  // Build the set of covered case IDs (same logic as coverage())
+  const passedTestIds = new Set(
+    allRuns.flatMap((r) => r.results.filter((res) => res.status === "pass").map((res) => res.testId)),
+  );
+  const passedCaseKeys = new Set(
+    allRuns
+      .filter((r) => r.source !== "manual")
+      .flatMap((r) => r.results.filter((res) => res.status === "pass").map((res) => res.testId)),
+  );
+  const caseKeyIndex = new Map(allCases.filter((c) => c.caseKey).map((c) => [c.caseKey!, c.id]));
+
+  const isCovered = (caseId: string): boolean => {
+    if (passedTestIds.has(caseId)) return true;
+    // Look up by caseKey
+    for (const [key, id] of caseKeyIndex) {
+      if (id === caseId && passedCaseKeys.has(key)) return true;
+    }
+    return false;
+  };
+
+  return reqs.map((req) => {
+    const totalCases = req.caseIds.length;
+    const coveredCases = req.caseIds.filter((id) => isCovered(id)).length;
+    return {
+      requirement: req,
+      totalCases,
+      coveredCases,
+      coveragePct: totalCases === 0 ? 0 : (coveredCases / totalCases) * 100,
     };
   });
 }

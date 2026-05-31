@@ -18,6 +18,7 @@ export default async function SettingsPage() {
     eyes: eyesLastSeen,
     net: netLastSeen,
     runner: runnerLastSeen,
+    hub: null,
   };
   return (
     <>

@@ -17,6 +17,7 @@ const patchSchema = z
     eyes: configSchema.optional(),
     net: configSchema.optional(),
     runner: configSchema.optional(),
+    hub: configSchema.optional(),
   })
   .strict();
 

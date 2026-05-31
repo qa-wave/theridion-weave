@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, ListChecks, FolderKanban, PlayCircle, Settings } from "lucide-react";
+import { LayoutDashboard, ListChecks, FolderKanban, PlayCircle, Settings, BookText } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const items = [
@@ -10,6 +10,7 @@ const items = [
   { href: "/cases", label: "Test cases", icon: ListChecks },
   { href: "/plans", label: "Plány", icon: FolderKanban },
   { href: "/runs", label: "Běhy", icon: PlayCircle },
+  { href: "/requirements", label: "Požadavky", icon: BookText },
   { href: "/settings", label: "Nastavení", icon: Settings },
 ];
 

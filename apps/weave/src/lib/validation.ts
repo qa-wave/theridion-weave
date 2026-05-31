@@ -77,7 +77,34 @@ export const patchRunResultSchema = z.object({
   status: z.enum(["pass", "fail", "skip", "blocked"]),
   notes: z.string().optional(),
   evidence: z.string().url("Evidence must be a valid URL").optional().or(z.literal("")),
+  issueUrl: z.string().url("issueUrl must be a valid URL").optional().or(z.literal("")),
 });
+
+/** Patch issueUrl on a single test result (defect linking). */
+export const patchRunResultIssueSchema = z.object({
+  testId: z.string().min(1),
+  issueUrl: z.string().url("issueUrl must be a valid URL").optional().or(z.literal("")),
+});
+
+// ─── Requirements ─────────────────────────────────────────────────────────────
+
+export const createRequirementSchema = z.object({
+  title: z.string().min(1, "Title is required").max(300),
+  description: z.string().default(""),
+  status: z.enum(["open", "in_progress", "done", "deprecated"]).default("open"),
+  priority: z.enum(["low", "medium", "high", "critical"]).default("medium"),
+  externalUrl: z.string().url("externalUrl must be a valid URL").optional().or(z.literal("")).transform((v) => v || undefined),
+  caseIds: z.array(z.string()).default([]),
+});
+
+export const updateRequirementSchema = createRequirementSchema.partial().extend({
+  id: z.string(),
+});
+
+// ─── Import ───────────────────────────────────────────────────────────────────
+
+/** Accepted import format for POST /api/runs/import */
+export const importFormatSchema = z.enum(["junit", "playwright"]);
 
 export type CreateTestCaseInput = z.infer<typeof createTestCaseSchema>;
 export type UpdateTestCaseInput = z.infer<typeof updateTestCaseSchema>;
@@ -87,3 +114,6 @@ export type CreateTestRunInput = z.infer<typeof createTestRunSchema>;
 export type RunnerIngestInput = z.infer<typeof runnerIngestSchema>;
 export type CreateRunFromPlanInput = z.infer<typeof createRunFromPlanSchema>;
 export type PatchRunResultInput = z.infer<typeof patchRunResultSchema>;
+export type PatchRunResultIssueInput = z.infer<typeof patchRunResultIssueSchema>;
+export type CreateRequirementInput = z.infer<typeof createRequirementSchema>;
+export type UpdateRequirementInput = z.infer<typeof updateRequirementSchema>;

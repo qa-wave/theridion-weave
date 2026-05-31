@@ -3,7 +3,7 @@
 // No server imports here so this can be used from client components. Server-only
 // persistence lives in integrations.server.ts.
 
-export type IntegrationKey = "eyes" | "net" | "runner";
+export type IntegrationKey = "eyes" | "net" | "runner" | "hub";
 
 export interface IntegrationConfig {
   enabled: boolean;
@@ -30,6 +30,11 @@ export const INTEGRATION_META: Record<IntegrationKey, { label: string; hint: str
     hint: "CI publisher — Runner posílá výsledky na /api/runs/ingest. Token = WEAVE_INGEST_TOKEN.",
     defaultUrl: "https://theridion-runner.qawave.ai",
   },
+  hub: {
+    label: "Theridion Hub",
+    hint: "SDLC QA přehled — Weave posílá webhook po dokončení běhu (outbound). Token = WEAVE_HUB_TOKEN.",
+    defaultUrl: "https://theridion-hub.qawave.ai",
+  },
 };
 
 export function defaultSettings(): WeaveSettings {
@@ -37,6 +42,7 @@ export function defaultSettings(): WeaveSettings {
     eyes: { enabled: false, baseUrl: INTEGRATION_META.eyes.defaultUrl, token: "" },
     net: { enabled: false, baseUrl: INTEGRATION_META.net.defaultUrl, token: "" },
     runner: { enabled: false, baseUrl: INTEGRATION_META.runner.defaultUrl, token: "" },
+    hub: { enabled: false, baseUrl: INTEGRATION_META.hub.defaultUrl, token: "" },
   };
 }
 
