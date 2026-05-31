@@ -22,6 +22,7 @@ export function CaseForm() {
   const [status, setStatus] = useState("draft");
   const [tags, setTags] = useState("");
   const [expectedResult, setExpectedResult] = useState("");
+  const [caseKey, setCaseKey] = useState("");
   const [steps, setSteps] = useState<StepDraft[]>([{ action: "", expectedResult: "" }]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -43,6 +44,7 @@ export function CaseForm() {
       type: "manual" as const,
       tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
       expectedResult,
+      caseKey: caseKey.trim() || undefined,
       steps: steps
         .filter((s) => s.action.trim())
         .map((s, idx) => ({ order: idx + 1, action: s.action, expectedResult: s.expectedResult || undefined })),
@@ -98,6 +100,20 @@ export function CaseForm() {
             <option value="active">active</option>
             <option value="deprecated">deprecated</option>
           </select>
+        </div>
+        <div className="col-span-2">
+          <label className={labelCls}>
+            Case Key{" "}
+            <span className="font-normal text-[var(--muted)]">
+              (volitelný stabilní klíč pro párování s automatizovanými běhy)
+            </span>
+          </label>
+          <input
+            className={input}
+            value={caseKey}
+            onChange={(e) => setCaseKey(e.target.value)}
+            placeholder="auth.login.happy-path"
+          />
         </div>
       </div>
 

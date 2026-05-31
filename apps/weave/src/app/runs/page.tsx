@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { Plus } from "lucide-react";
 import { listTestRuns } from "@/data/store";
 import { summariseRun } from "@/lib/utils";
 import { Card, PageHeader, ResultBadge, SourceBadge } from "@/components/ui";
@@ -20,6 +22,14 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
       <PageHeader
         title="Běhy"
         description="Sloučený pohled na manuální běhy a automatizované výsledky z Eyes (FE) a Net (BE)."
+        action={
+          <Link
+            href="/runs/new"
+            className="flex items-center gap-2 rounded-lg bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white hover:opacity-90"
+          >
+            <Plus size={16} /> Nový běh
+          </Link>
+        }
       />
 
       <div className="mb-4 flex gap-2 text-xs">
@@ -38,6 +48,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
         )}
         {runs.map((run) => {
           const s = summariseRun(run);
+          const inProgress = run.source === "manual" && run.finishedAt === null;
           return (
             <Card key={run.id}>
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -45,8 +56,21 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
                   <SourceBadge source={run.source} />
                   <span className="font-medium">{run.label ?? run.suiteName ?? run.id}</span>
                   {run.suiteName && <span className="text-xs text-[var(--muted)]">{run.suiteName}</span>}
+                  {inProgress && (
+                    <span className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-300">
+                      probíhá
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-4 text-xs text-[var(--muted)]">
+                  {inProgress && (
+                    <Link
+                      href={`/runs/${run.id}/execute`}
+                      className="rounded-md bg-[var(--accent)] px-2 py-1 text-xs font-medium text-white hover:opacity-90"
+                    >
+                      Pokračovat
+                    </Link>
+                  )}
                   <span>pass {formatPercent(s.passRate, 0)}</span>
                   <span>{formatDuration(s.durationMs)}</span>
                   <span>{formatDateTime(run.startedAt)}</span>

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { runnerIngestSchema } from "@/lib/validation";
 import { runResultV2Schema, normalizeRunResult } from "@/lib/run-result";
-import { ingestRun, saveIngestedRun } from "@/data/store";
+import { ingestRun, recordLastSeen, saveIngestedRun } from "@/data/store";
 import { enabledIntegrations } from "@/lib/integrations.server";
 import { logger } from "@/lib/logger";
 
@@ -60,6 +60,11 @@ export async function POST(req: Request) {
     try {
       const run = normalizeRunResult(parsed.data);
       const { created } = await saveIngestedRun(run);
+      // Record health timestamp for the source (best-effort)
+      const src = parsed.data.product;
+      if (src === "eyes" || src === "net" || src === "runner") {
+        recordLastSeen(src).catch(() => undefined);
+      }
       return NextResponse.json(
         { id: run.id, accepted: run.results.length, deduped: !created },
         { status: created ? 201 : 200 },
@@ -80,6 +85,11 @@ export async function POST(req: Request) {
   }
   try {
     const run = await ingestRun(parsed.data);
+    // Record health timestamp for the source (best-effort)
+    const src = parsed.data.source;
+    if (src === "eyes" || src === "net" || src === "runner") {
+      recordLastSeen(src).catch(() => undefined);
+    }
     return NextResponse.json({ id: run.id, accepted: run.results.length }, { status: 201 });
   } catch (e) {
     logger.error("ingest (legacy) failed", e);

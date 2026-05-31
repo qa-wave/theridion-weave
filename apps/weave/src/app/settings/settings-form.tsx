@@ -17,7 +17,30 @@ interface RowState {
   tokenSet: boolean;
 }
 
-export function SettingsForm({ initial }: { initial: WeaveSettingsView }) {
+/** Format an ISO timestamp as a short relative/absolute label. */
+function formatLastSeen(iso: string | null): { label: string; healthy: boolean } {
+  if (!iso) return { label: "Nikdy", healthy: false };
+  const d = new Date(iso);
+  const diffMs = Date.now() - d.getTime();
+  const diffMin = Math.round(diffMs / 60_000);
+  const diffHour = Math.round(diffMin / 60);
+  const diffDay = Math.round(diffHour / 24);
+  let label: string;
+  if (diffMin < 2) label = "právě teď";
+  else if (diffMin < 60) label = `před ${diffMin} min`;
+  else if (diffHour < 24) label = `před ${diffHour} h`;
+  else if (diffDay === 1) label = "včera";
+  else label = `před ${diffDay} dny`;
+  // Healthy = seen within 24 hours
+  return { label, healthy: diffMs < 24 * 60 * 60_000 };
+}
+
+interface Props {
+  initial: WeaveSettingsView;
+  lastSeen: Record<IntegrationKey, string | null>;
+}
+
+export function SettingsForm({ initial, lastSeen }: Props) {
   const router = useRouter();
   const [rows, setRows] = useState<Record<IntegrationKey, RowState>>(() => {
     const r = {} as Record<IntegrationKey, RowState>;
@@ -62,6 +85,7 @@ export function SettingsForm({ initial }: { initial: WeaveSettingsView }) {
       {KEYS.map((k) => {
         const meta = INTEGRATION_META[k];
         const row = rows[k];
+        const ls = formatLastSeen(lastSeen[k]);
         return (
           <div
             key={k}
@@ -69,7 +93,15 @@ export function SettingsForm({ initial }: { initial: WeaveSettingsView }) {
           >
             <div className="flex items-start justify-between gap-4">
               <div>
-                <div className="font-medium">{meta.label}</div>
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">{meta.label}</span>
+                  {/* Health dot */}
+                  <span
+                    className={`inline-block h-2 w-2 rounded-full ${ls.healthy ? "bg-emerald-400" : "bg-zinc-500"}`}
+                    title={ls.healthy ? "Aktivní" : "Žádná data"}
+                  />
+                  <span className="text-xs text-[var(--muted)]">Naposledy: {ls.label}</span>
+                </div>
                 <p className="mt-0.5 text-xs text-[var(--muted)]">{meta.hint}</p>
               </div>
               <button

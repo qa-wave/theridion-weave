@@ -21,6 +21,12 @@ export interface TestCase {
   status: TestCaseStatus;
   type: TestCaseType;
   owner: string;
+  /**
+   * Optional stable identifier matching automated run results via
+   * RunResult v2 `test_key` / `meta.weave_case_key`. Used for coverage
+   * cross-matching between manual cases and automated runs.
+   */
+  caseKey?: string;
   createdAt: string;
   updatedAt: string;
 }

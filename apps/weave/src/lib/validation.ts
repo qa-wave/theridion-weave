@@ -16,6 +16,8 @@ export const createTestCaseSchema = z.object({
   status: z.enum(["draft", "active", "deprecated"]).default("draft"),
   type: z.literal("manual").default("manual"),
   owner: z.string().min(1, "Owner is required"),
+  /** Stable key for automated coverage cross-matching (test_key / weave_case_key). */
+  caseKey: z.string().max(200).optional(),
 });
 
 export const updateTestCaseSchema = createTestCaseSchema.partial().extend({
@@ -62,9 +64,26 @@ export const runnerIngestSchema = z.object({
   results: z.array(testResultSchema),
 });
 
+/** Payload for scaffolding a manual run from a test plan. */
+export const createRunFromPlanSchema = z.object({
+  planId: z.string().min(1),
+  triggeredBy: z.string().min(1).default("manual"),
+  label: z.string().optional(),
+});
+
+/** Payload for PATCH /api/runs/[id]/result — update a single test result inside a run. */
+export const patchRunResultSchema = z.object({
+  testId: z.string().min(1),
+  status: z.enum(["pass", "fail", "skip", "blocked"]),
+  notes: z.string().optional(),
+  evidence: z.string().url("Evidence must be a valid URL").optional().or(z.literal("")),
+});
+
 export type CreateTestCaseInput = z.infer<typeof createTestCaseSchema>;
 export type UpdateTestCaseInput = z.infer<typeof updateTestCaseSchema>;
 export type CreateTestPlanInput = z.infer<typeof createTestPlanSchema>;
 export type UpdateTestPlanInput = z.infer<typeof updateTestPlanSchema>;
 export type CreateTestRunInput = z.infer<typeof createTestRunSchema>;
 export type RunnerIngestInput = z.infer<typeof runnerIngestSchema>;
+export type CreateRunFromPlanInput = z.infer<typeof createRunFromPlanSchema>;
+export type PatchRunResultInput = z.infer<typeof patchRunResultSchema>;

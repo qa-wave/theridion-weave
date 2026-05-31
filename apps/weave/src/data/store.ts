@@ -16,6 +16,7 @@ import type {
   TestRun,
 } from "@/lib/types";
 import type {
+  CreateRunFromPlanInput,
   CreateTestCaseInput,
   CreateTestPlanInput,
   CreateTestRunInput,
@@ -54,9 +55,12 @@ export async function migrate(): Promise<void> {
     tags jsonb not null default '[]',
     status text not null default 'draft',
     owner text not null,
+    case_key text,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
   )`;
+  // Idempotent column addition for existing tables
+  await q`alter table if exists test_cases add column if not exists case_key text`;
   await q`create table if not exists test_plans (
     id text primary key,
     name text not null,
@@ -111,9 +115,10 @@ export async function seedDatabase(): Promise<{ cases: number; plans: number; ru
   const data = seed();
   for (const c of data.cases) {
     await q`insert into test_cases
-      (id, title, description, steps, expected_result, priority, tags, status, owner, created_at, updated_at)
+      (id, title, description, steps, expected_result, priority, tags, status, owner, case_key, created_at, updated_at)
       values (${c.id}, ${c.title}, ${c.description}, ${JSON.stringify(c.steps)}, ${c.expectedResult},
-              ${c.priority}, ${JSON.stringify(c.tags)}, ${c.status}, ${c.owner}, ${c.createdAt}, ${c.updatedAt})
+              ${c.priority}, ${JSON.stringify(c.tags)}, ${c.status}, ${c.owner}, ${c.caseKey ?? null},
+              ${c.createdAt}, ${c.updatedAt})
       on conflict (id) do nothing`;
   }
   for (const p of data.plans) {
@@ -144,6 +149,7 @@ function rowToCase(r: any): TestCase {
     status: r.status,
     type: "manual",
     owner: r.owner,
+    ...(r.case_key ? { caseKey: r.case_key } : {}),
     createdAt: new Date(r.created_at).toISOString(),
     updatedAt: new Date(r.updated_at).toISOString(),
   };
@@ -406,15 +412,16 @@ export async function createTestCase(input: CreateTestCaseInput): Promise<TestCa
     status: input.status,
     type: "manual",
     owner: input.owner,
+    ...(input.caseKey ? { caseKey: input.caseKey } : {}),
     createdAt: now,
     updatedAt: now,
   };
   if (USE_DB) {
     await sql()`insert into test_cases
-      (id, title, description, steps, expected_result, priority, tags, status, owner, created_at, updated_at)
+      (id, title, description, steps, expected_result, priority, tags, status, owner, case_key, created_at, updated_at)
       values (${tc.id}, ${tc.title}, ${tc.description}, ${JSON.stringify(tc.steps)},
               ${tc.expectedResult}, ${tc.priority}, ${JSON.stringify(tc.tags)}, ${tc.status},
-              ${tc.owner}, ${tc.createdAt}, ${tc.updatedAt})`;
+              ${tc.owner}, ${tc.caseKey ?? null}, ${tc.createdAt}, ${tc.updatedAt})`;
   } else {
     mem.cases.push(tc);
   }
@@ -424,6 +431,8 @@ export async function createTestCase(input: CreateTestCaseInput): Promise<TestCa
 export async function updateTestCase(input: UpdateTestCaseInput): Promise<TestCase | undefined> {
   const existing = await getTestCase(input.id);
   if (!existing) return undefined;
+  // caseKey: explicit undefined means "keep existing"; null/empty means "clear"
+  const caseKey = "caseKey" in input ? (input.caseKey || undefined) : existing.caseKey;
   const next: TestCase = {
     ...existing,
     title: input.title ?? existing.title,
@@ -434,13 +443,15 @@ export async function updateTestCase(input: UpdateTestCaseInput): Promise<TestCa
     tags: input.tags ?? existing.tags,
     status: input.status ?? existing.status,
     owner: input.owner ?? existing.owner,
+    caseKey,
     updatedAt: new Date().toISOString(),
   };
   if (USE_DB) {
     await sql()`update test_cases set
       title = ${next.title}, description = ${next.description}, steps = ${JSON.stringify(next.steps)},
       expected_result = ${next.expectedResult}, priority = ${next.priority}, tags = ${JSON.stringify(next.tags)},
-      status = ${next.status}, owner = ${next.owner}, updated_at = ${next.updatedAt}
+      status = ${next.status}, owner = ${next.owner}, case_key = ${next.caseKey ?? null},
+      updated_at = ${next.updatedAt}
       where id = ${next.id}`;
   } else {
     const i = mem.cases.findIndex((c) => c.id === next.id);
@@ -558,6 +569,63 @@ export async function saveIngestedRun(run: TestRun): Promise<{ created: boolean;
   return { created: true, run };
 }
 
+/**
+ * Scaffold a manual run from a test plan — creates a TestRun with one pending
+ * result per case in the plan. The run is immediately persisted as source='manual'
+ * with finishedAt=null (in-progress).
+ */
+export async function createRunFromPlan(input: CreateRunFromPlanInput): Promise<TestRun | null> {
+  const plan = await getTestPlan(input.planId);
+  if (!plan) return null;
+  const cases = await Promise.all(plan.testCaseIds.map((id) => getTestCase(id)));
+  const validCases = cases.filter((c): c is TestCase => c !== undefined);
+  const now = new Date().toISOString();
+  return insertRun({
+    id: `run-${randomUUID().slice(0, 8)}`,
+    planId: plan.id,
+    source: "manual",
+    startedAt: now,
+    finishedAt: null,
+    triggeredBy: input.triggeredBy,
+    label: input.label,
+    results: validCases.map((c) => ({
+      testId: c.id,
+      title: c.title,
+      status: "skip" as const, // default — tester will update each result
+      durationMs: 0,
+    })),
+  });
+}
+
+/**
+ * Patch a single result inside an existing run.
+ * Also marks finishedAt when all results are no longer "skip" (i.e. reviewed).
+ */
+export async function patchRunResult(
+  runId: string,
+  testId: string,
+  patch: { status: "pass" | "fail" | "skip" | "blocked"; notes?: string; evidence?: string },
+): Promise<TestRun | null> {
+  const run = await getTestRun(runId);
+  if (!run) return null;
+  const results = run.results.map((r) =>
+    r.testId === testId ? { ...r, status: patch.status, notes: patch.notes, evidence: patch.evidence || undefined } : r,
+  );
+  const allReviewed = results.every((r) => r.status !== "skip");
+  const finishedAt = allReviewed ? (run.finishedAt ?? new Date().toISOString()) : null;
+  const updated: TestRun = { ...run, results, finishedAt };
+
+  if (USE_DB) {
+    await sql()`update test_runs set results = ${JSON.stringify(results)},
+      finished_at = ${finishedAt}
+      where id = ${runId}`;
+  } else {
+    const i = mem.runs.findIndex((r) => r.id === runId);
+    if (i !== -1) mem.runs[i] = updated;
+  }
+  return updated;
+}
+
 /** Accept a run published by Eyes/Net via Runner (same payload shape). */
 export async function ingestRun(input: RunnerIngestInput): Promise<TestRun> {
   return insertRun({
@@ -572,6 +640,18 @@ export async function ingestRun(input: RunnerIngestInput): Promise<TestRun> {
   });
 }
 
+// ─── Source health (lastSeen) ─────────────────────────────────────────────────
+
+/** Record the current timestamp as lastSeen for a given integration source. */
+export async function recordLastSeen(source: "eyes" | "net" | "runner"): Promise<void> {
+  await kvSet(`lastSeen:${source}`, new Date().toISOString());
+}
+
+/** Retrieve lastSeen ISO timestamp for a source, or null if never seen. */
+export async function getLastSeen(source: "eyes" | "net" | "runner"): Promise<string | null> {
+  return kvGet<string>(`lastSeen:${source}`);
+}
+
 // ─── Aggregation ──────────────────────────────────────────────────────────────
 
 export async function recentRunSummaries(limit = 10): Promise<RunSummary[]> {
@@ -580,12 +660,29 @@ export async function recentRunSummaries(limit = 10): Promise<RunSummary[]> {
 }
 
 export async function coverage(): Promise<CoverageSummary> {
-  const [cases, runs] = await Promise.all([listTestCases(), listTestRuns("manual")]);
+  const [cases, allRuns] = await Promise.all([listTestCases(), listTestRuns()]);
   const active = cases.filter((c) => c.status === "active");
-  const passedCaseIds = new Set(
-    runs.flatMap((r) => r.results.filter((res) => res.status === "pass").map((res) => res.testId)),
+
+  // Collect all passing testIds across ALL sources (manual + automated)
+  const passedTestIds = new Set(
+    allRuns.flatMap((r) => r.results.filter((res) => res.status === "pass").map((res) => res.testId)),
   );
-  const covered = active.filter((c) => passedCaseIds.has(c.id)).length;
+
+  // Build a caseKey index for automated coverage matching
+  const passedCaseKeys = new Set(
+    allRuns
+      .filter((r) => r.source !== "manual")
+      .flatMap((r) => r.results.filter((res) => res.status === "pass").map((res) => res.testId)),
+  );
+
+  const covered = active.filter(
+    (c) =>
+      // Direct match: manual run testId = case id
+      passedTestIds.has(c.id) ||
+      // Automated match: automated run test_key = case.caseKey
+      (c.caseKey != null && c.caseKey !== "" && passedCaseKeys.has(c.caseKey)),
+  ).length;
+
   return {
     total: cases.length,
     active: active.length,
