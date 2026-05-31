@@ -13,7 +13,7 @@ function emit(level: Level, msg: string, err?: unknown) {
 }
 
 export const logger = {
-  info: (msg: string) => emit("info", msg),
-  warn: (msg: string) => emit("warn", msg),
+  info: (msg: string, err?: unknown) => emit("info", msg, err),
+  warn: (msg: string, err?: unknown) => emit("warn", msg, err),
   error: (msg: string, err?: unknown) => emit("error", msg, err),
 };

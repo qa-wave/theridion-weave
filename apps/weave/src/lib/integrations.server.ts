@@ -35,6 +35,10 @@ export async function saveSettings(
       enabled: p.enabled ?? current[k].enabled,
       baseUrl: p.baseUrl ?? current[k].baseUrl,
       token,
+      email: p.email ?? current[k].email,
+      projectKey: p.projectKey ?? current[k].projectKey,
+      spaceKey: p.spaceKey ?? current[k].spaceKey,
+      statusTransitionMap: p.statusTransitionMap ?? current[k].statusTransitionMap,
     };
   }
   await kvSet(KEY, current);

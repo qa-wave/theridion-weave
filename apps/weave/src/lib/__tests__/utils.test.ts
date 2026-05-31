@@ -24,6 +24,8 @@ describe("summariseRun", () => {
     startedAt: "2026-05-30T09:00:00.000Z",
     finishedAt: "2026-05-30T09:05:00.000Z",
     triggeredBy: "qa",
+    runStatus: "completed",
+    statusHistory: [],
     results: [
       { testId: "a", title: "a", status: "pass", durationMs: 1000 },
       { testId: "b", title: "b", status: "fail", durationMs: 2000 },

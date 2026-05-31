@@ -4,22 +4,24 @@ import { maskSettings } from "@/lib/integrations";
 import { loadSettings, saveSettings } from "@/lib/integrations.server";
 import { logger } from "@/lib/logger";
 
-const configSchema = z
-  .object({
-    enabled: z.boolean().optional(),
-    baseUrl: z.string().max(300).optional(),
-    token: z.string().max(500).optional(),
-  })
-  .strict();
+const configSchema = z.object({
+  enabled: z.boolean().optional(),
+  baseUrl: z.string().max(300).optional(),
+  token: z.string().max(500).optional(),
+  email: z.string().max(300).optional(),
+  projectKey: z.string().max(50).optional(),
+  spaceKey: z.string().max(50).optional(),
+  statusTransitionMap: z.string().max(2000).optional(),
+});
 
-const patchSchema = z
-  .object({
-    eyes: configSchema.optional(),
-    net: configSchema.optional(),
-    runner: configSchema.optional(),
-    hub: configSchema.optional(),
-  })
-  .strict();
+const patchSchema = z.object({
+  eyes: configSchema.optional(),
+  net: configSchema.optional(),
+  runner: configSchema.optional(),
+  hub: configSchema.optional(),
+  jira: configSchema.optional(),
+  confluence: configSchema.optional(),
+});
 
 const unavailable = () =>
   NextResponse.json({ error: "Úložiště nedostupné", code: "store_unavailable" }, {

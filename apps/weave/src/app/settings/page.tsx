@@ -19,6 +19,8 @@ export default async function SettingsPage() {
     net: netLastSeen,
     runner: runnerLastSeen,
     hub: null,
+    jira: null,
+    confluence: null,
   };
   return (
     <>

@@ -168,6 +168,8 @@ export function importJUnit(
     startedAt: now,
     finishedAt: now,
     results,
+    runStatus: "completed" as const,
+    statusHistory: [],
   };
 }
 
@@ -275,5 +277,7 @@ export function importPlaywright(
     startedAt,
     finishedAt,
     results,
+    runStatus: "completed" as const,
+    statusHistory: [],
   };
 }

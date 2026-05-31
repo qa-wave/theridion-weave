@@ -13,7 +13,7 @@ export const createTestCaseSchema = z.object({
   expectedResult: z.string().default(""),
   priority: z.enum(["low", "medium", "high", "critical"]).default("medium"),
   tags: z.array(z.string()).default([]),
-  status: z.enum(["draft", "active", "deprecated"]).default("draft"),
+  status: z.enum(["draft", "in_review", "active", "deprecated"]).default("draft"),
   type: z.literal("manual").default("manual"),
   owner: z.string().min(1, "Owner is required"),
   /** Stable key for automated coverage cross-matching (test_key / weave_case_key). */
@@ -101,6 +101,39 @@ export const updateRequirementSchema = createRequirementSchema.partial().extend(
   id: z.string(),
 });
 
+// ─── Scripts ──────────────────────────────────────────────────────────────────
+
+export const createTestScriptSchema = z.object({
+  name: z.string().min(1, "Name is required").max(200),
+  product: z.enum(["eyes", "net"]),
+  framework: z.string().min(1, "Framework is required").max(100),
+  specPath: z.string().max(500).optional(),
+  caseKey: z.string().max(200).optional(),
+  status: z.enum(["draft", "active", "flaky", "deprecated"]).default("draft"),
+  owner: z.string().min(1, "Owner is required"),
+});
+
+export const updateTestScriptSchema = createTestScriptSchema.partial().extend({
+  id: z.string(),
+});
+
+export const patchScriptStatusSchema = z.object({
+  status: z.enum(["draft", "active", "flaky", "deprecated"]),
+  by: z.string().default("system"),
+});
+
+// ─── Workflow status patches ───────────────────────────────────────────────────
+
+export const patchTestCaseStatusSchema = z.object({
+  status: z.enum(["draft", "in_review", "active", "deprecated"]),
+  by: z.string().default("system"),
+});
+
+export const patchRunStatusSchema = z.object({
+  runStatus: z.enum(["created", "in_progress", "completed", "signed_off", "blocked"]),
+  by: z.string().default("system"),
+});
+
 // ─── Import ───────────────────────────────────────────────────────────────────
 
 /** Accepted import format for POST /api/runs/import */
@@ -117,3 +150,8 @@ export type PatchRunResultInput = z.infer<typeof patchRunResultSchema>;
 export type PatchRunResultIssueInput = z.infer<typeof patchRunResultIssueSchema>;
 export type CreateRequirementInput = z.infer<typeof createRequirementSchema>;
 export type UpdateRequirementInput = z.infer<typeof updateRequirementSchema>;
+export type CreateTestScriptInput = z.infer<typeof createTestScriptSchema>;
+export type UpdateTestScriptInput = z.infer<typeof updateTestScriptSchema>;
+export type PatchScriptStatusInput = z.infer<typeof patchScriptStatusSchema>;
+export type PatchTestCaseStatusInput = z.infer<typeof patchTestCaseStatusSchema>;
+export type PatchRunStatusInput = z.infer<typeof patchRunStatusSchema>;

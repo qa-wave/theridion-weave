@@ -12,20 +12,27 @@ import type {
   Requirement,
   RequirementCoverageRow,
   RunSource,
+  RunWorkflowStatus,
   RunSummary,
+  ScriptProduct,
+  ScriptStatus,
   TestCase,
   TestPlan,
   TestRun,
+  TestScript,
 } from "@/lib/types";
+import { appendHistory } from "@/lib/workflow";
 import type {
   CreateRequirementInput,
   CreateRunFromPlanInput,
   CreateTestCaseInput,
   CreateTestPlanInput,
   CreateTestRunInput,
+  CreateTestScriptInput,
   RunnerIngestInput,
   UpdateRequirementInput,
   UpdateTestCaseInput,
+  UpdateTestScriptInput,
 } from "@/lib/validation";
 import { summariseRun } from "@/lib/utils";
 
@@ -100,6 +107,26 @@ export async function migrate(): Promise<void> {
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
   )`;
+  await q`create table if not exists test_scripts (
+    id text primary key,
+    name text not null,
+    product text not null,
+    framework text not null,
+    spec_path text,
+    case_key text,
+    status text not null default 'draft',
+    owner text not null,
+    jira_key text,
+    status_history jsonb not null default '[]',
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`;
+  // Idempotent column additions for existing tables
+  await q`alter table if exists test_cases add column if not exists jira_key text`;
+  await q`alter table if exists test_cases add column if not exists status_history jsonb not null default '[]'`;
+  await q`alter table if exists test_runs add column if not exists run_status text not null default 'created'`;
+  await q`alter table if exists test_runs add column if not exists jira_key text`;
+  await q`alter table if exists test_runs add column if not exists status_history jsonb not null default '[]'`;
 }
 
 // ─── Generic key/value (settings) ─────────────────────────────────────────────
@@ -125,15 +152,15 @@ export async function kvSet<T>(key: string, value: T): Promise<void> {
 }
 
 /** Insert the demo dataset into Neon (idempotent — skips existing IDs). */
-export async function seedDatabase(): Promise<{ cases: number; plans: number; runs: number; requirements: number }> {
+export async function seedDatabase(): Promise<{ cases: number; plans: number; runs: number; requirements: number; scripts: number }> {
   const q = sql();
   const data = seed();
   for (const c of data.cases) {
     await q`insert into test_cases
-      (id, title, description, steps, expected_result, priority, tags, status, owner, case_key, created_at, updated_at)
+      (id, title, description, steps, expected_result, priority, tags, status, owner, case_key, jira_key, status_history, created_at, updated_at)
       values (${c.id}, ${c.title}, ${c.description}, ${JSON.stringify(c.steps)}, ${c.expectedResult},
               ${c.priority}, ${JSON.stringify(c.tags)}, ${c.status}, ${c.owner}, ${c.caseKey ?? null},
-              ${c.createdAt}, ${c.updatedAt})
+              ${c.jiraKey ?? null}, ${JSON.stringify(c.statusHistory)}, ${c.createdAt}, ${c.updatedAt})
       on conflict (id) do nothing`;
   }
   for (const p of data.plans) {
@@ -155,7 +182,15 @@ export async function seedDatabase(): Promise<{ cases: number; plans: number; ru
               ${req.externalUrl ?? null}, ${JSON.stringify(req.caseIds)}, ${req.createdAt}, ${req.updatedAt})
       on conflict (id) do nothing`;
   }
-  return { cases: data.cases.length, plans: data.plans.length, runs: data.runs.length, requirements: data.requirements.length };
+  for (const scr of data.scripts) {
+    await q`insert into test_scripts
+      (id, name, product, framework, spec_path, case_key, status, owner, jira_key, status_history, created_at, updated_at)
+      values (${scr.id}, ${scr.name}, ${scr.product}, ${scr.framework}, ${scr.specPath ?? null},
+              ${scr.caseKey ?? null}, ${scr.status}, ${scr.owner}, ${scr.jiraKey ?? null},
+              ${JSON.stringify(scr.statusHistory)}, ${scr.createdAt}, ${scr.updatedAt})
+      on conflict (id) do nothing`;
+  }
+  return { cases: data.cases.length, plans: data.plans.length, runs: data.runs.length, requirements: data.requirements.length, scripts: data.scripts.length };
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -185,6 +220,25 @@ function rowToCase(r: any): TestCase {
     type: "manual",
     owner: r.owner,
     ...(r.case_key ? { caseKey: r.case_key } : {}),
+    ...(r.jira_key ? { jiraKey: r.jira_key } : {}),
+    statusHistory: r.status_history ?? [],
+    createdAt: new Date(r.created_at).toISOString(),
+    updatedAt: new Date(r.updated_at).toISOString(),
+  };
+}
+
+function rowToScript(r: any): TestScript {
+  return {
+    id: r.id,
+    name: r.name,
+    product: r.product as ScriptProduct,
+    framework: r.framework,
+    specPath: r.spec_path ?? undefined,
+    caseKey: r.case_key ?? undefined,
+    status: r.status as ScriptStatus,
+    owner: r.owner,
+    ...(r.jira_key ? { jiraKey: r.jira_key } : {}),
+    statusHistory: r.status_history ?? [],
     createdAt: new Date(r.created_at).toISOString(),
     updatedAt: new Date(r.updated_at).toISOString(),
   };
@@ -210,6 +264,9 @@ function rowToRun(r: any): TestRun {
     startedAt: new Date(r.started_at).toISOString(),
     finishedAt: r.finished_at ? new Date(r.finished_at).toISOString() : null,
     results: r.results ?? [],
+    runStatus: (r.run_status ?? "created") as RunWorkflowStatus,
+    ...(r.jira_key ? { jiraKey: r.jira_key } : {}),
+    statusHistory: r.status_history ?? [],
   };
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
@@ -221,6 +278,7 @@ interface Store {
   plans: TestPlan[];
   runs: TestRun[];
   requirements: Requirement[];
+  scripts: TestScript[];
 }
 
 const DAY = 86_400_000;
@@ -247,6 +305,10 @@ function seed(): Store {
       owner: "qa@qawave.ai",
       createdAt: at(40),
       updatedAt: at(8),
+      statusHistory: [
+        { from: "draft", to: "in_review", by: "qa@qawave.ai", at: at(30) },
+        { from: "in_review", to: "active", by: "qa@qawave.ai", at: at(8) },
+      ],
     },
     {
       id: "tc-login-locked",
@@ -264,6 +326,9 @@ function seed(): Store {
       owner: "qa@qawave.ai",
       createdAt: at(38),
       updatedAt: at(12),
+      statusHistory: [
+        { from: "draft", to: "active", by: "qa@qawave.ai", at: at(12) },
+      ],
     },
     {
       id: "tc-checkout-coupon",
@@ -281,6 +346,9 @@ function seed(): Store {
       owner: "po@qawave.ai",
       createdAt: at(30),
       updatedAt: at(6),
+      statusHistory: [
+        { from: "draft", to: "active", by: "po@qawave.ai", at: at(6) },
+      ],
     },
     {
       id: "tc-export-csv",
@@ -295,6 +363,7 @@ function seed(): Store {
       owner: "qa@qawave.ai",
       createdAt: at(20),
       updatedAt: at(20),
+      statusHistory: [],
     },
     {
       id: "tc-legacy-flash",
@@ -309,6 +378,9 @@ function seed(): Store {
       owner: "qa@qawave.ai",
       createdAt: at(120),
       updatedAt: at(60),
+      statusHistory: [
+        { from: "active", to: "deprecated", by: "qa@qawave.ai", at: at(60) },
+      ],
     },
   ];
 
@@ -340,6 +412,12 @@ function seed(): Store {
       finishedAt: at(2, 38 * 60_000),
       triggeredBy: "qa@qawave.ai",
       label: "release-2.4.0",
+      runStatus: "signed_off",
+      statusHistory: [
+        { from: "created", to: "in_progress", by: "qa@qawave.ai", at: at(2, 0) },
+        { from: "in_progress", to: "completed", by: "qa@qawave.ai", at: at(2, 38 * 60_000) },
+        { from: "completed", to: "signed_off", by: "qa@qawave.ai", at: at(2, 40 * 60_000) },
+      ],
       results: [
         { testId: "tc-login-happy", title: "Přihlášení platnými údaji", status: "pass", durationMs: 95_000 },
         { testId: "tc-login-locked", title: "Zamčený účet po 5 pokusech", status: "pass", durationMs: 120_000 },
@@ -360,6 +438,11 @@ function seed(): Store {
       finishedAt: at(1, 4 * 60_000),
       triggeredBy: "ci/theridion-eyes",
       label: "main@a1b2c3d",
+      runStatus: "completed",
+      statusHistory: [
+        { from: "created", to: "in_progress", by: "ci/theridion-eyes", at: at(1, 0) },
+        { from: "in_progress", to: "completed", by: "ci/theridion-eyes", at: at(1, 4 * 60_000) },
+      ],
       results: [
         { testId: "auth › login renders", title: "auth › login renders", status: "pass", durationMs: 1_900 },
         { testId: "auth › invalid creds", title: "auth › invalid creds", status: "pass", durationMs: 2_400 },
@@ -381,6 +464,11 @@ function seed(): Store {
       finishedAt: at(1, 2 * 60_000),
       triggeredBy: "ci/theridion-net",
       label: "main@a1b2c3d",
+      runStatus: "completed",
+      statusHistory: [
+        { from: "created", to: "in_progress", by: "ci/theridion-net", at: at(1, 60_000) },
+        { from: "in_progress", to: "completed", by: "ci/theridion-net", at: at(1, 2 * 60_000) },
+      ],
       results: [
         { testId: "POST /login 200", title: "POST /login 200", status: "pass", durationMs: 320 },
         { testId: "POST /login 401", title: "POST /login 401", status: "pass", durationMs: 280 },
@@ -426,15 +514,58 @@ function seed(): Store {
     },
   ];
 
-  return { cases, plans, runs, requirements };
+  const scripts: TestScript[] = [
+    {
+      id: "scr-auth-login",
+      name: "Auth login spec",
+      product: "eyes",
+      framework: "Playwright",
+      specPath: "playwright/auth.spec.ts",
+      caseKey: undefined,
+      status: "active",
+      owner: "qa@qawave.ai",
+      statusHistory: [
+        { from: "draft", to: "active", by: "qa@qawave.ai", at: at(15) },
+      ],
+      createdAt: at(20),
+      updatedAt: at(15),
+    },
+    {
+      id: "scr-auth-api",
+      name: "Auth API collection",
+      product: "net",
+      framework: "Bruno",
+      specPath: "collections/auth-api",
+      caseKey: undefined,
+      status: "flaky",
+      owner: "qa@qawave.ai",
+      statusHistory: [
+        { from: "draft", to: "active", by: "qa@qawave.ai", at: at(18) },
+        { from: "active", to: "flaky", by: "ci", at: at(3) },
+      ],
+      createdAt: at(20),
+      updatedAt: at(3),
+    },
+  ];
+
+  return { cases, plans, runs, requirements, scripts };
 }
 
 const g = globalThis as unknown as { __weaveStore?: Store };
-function ensureRequirements(s: Store): Store {
+function ensureStore(s: Store): Store {
   if (!s.requirements) s.requirements = [];
+  if (!s.scripts) s.scripts = [];
+  // Ensure all cases/runs have statusHistory
+  for (const c of s.cases) {
+    if (!c.statusHistory) (c as TestCase).statusHistory = [];
+  }
+  for (const r of s.runs) {
+    if (!r.statusHistory) (r as TestRun).statusHistory = [];
+    if (!r.runStatus) (r as TestRun).runStatus = "created";
+  }
   return s;
 }
-const mem: Store = ensureRequirements(g.__weaveStore ?? (g.__weaveStore = seed()));
+const mem: Store = ensureStore(g.__weaveStore ?? (g.__weaveStore = seed()));
 
 /** Exported for the seed script — returns the canonical demo dataset. */
 export function seedData(): Store {
@@ -490,15 +621,17 @@ export async function createTestCase(input: CreateTestCaseInput): Promise<TestCa
     type: "manual",
     owner: input.owner,
     ...(input.caseKey ? { caseKey: input.caseKey } : {}),
+    statusHistory: [],
     createdAt: now,
     updatedAt: now,
   };
   if (USE_DB) {
     await sql()`insert into test_cases
-      (id, title, description, steps, expected_result, priority, tags, status, owner, case_key, created_at, updated_at)
+      (id, title, description, steps, expected_result, priority, tags, status, owner, case_key, jira_key, status_history, created_at, updated_at)
       values (${tc.id}, ${tc.title}, ${tc.description}, ${JSON.stringify(tc.steps)},
               ${tc.expectedResult}, ${tc.priority}, ${JSON.stringify(tc.tags)}, ${tc.status},
-              ${tc.owner}, ${tc.caseKey ?? null}, ${tc.createdAt}, ${tc.updatedAt})`;
+              ${tc.owner}, ${tc.caseKey ?? null}, ${tc.jiraKey ?? null},
+              ${JSON.stringify(tc.statusHistory)}, ${tc.createdAt}, ${tc.updatedAt})`;
   } else {
     mem.cases.push(tc);
   }
@@ -528,6 +661,7 @@ export async function updateTestCase(input: UpdateTestCaseInput): Promise<TestCa
       title = ${next.title}, description = ${next.description}, steps = ${JSON.stringify(next.steps)},
       expected_result = ${next.expectedResult}, priority = ${next.priority}, tags = ${JSON.stringify(next.tags)},
       status = ${next.status}, owner = ${next.owner}, case_key = ${next.caseKey ?? null},
+      jira_key = ${next.jiraKey ?? null}, status_history = ${JSON.stringify(next.statusHistory)},
       updated_at = ${next.updatedAt}
       where id = ${next.id}`;
   } else {
@@ -546,6 +680,42 @@ export async function deleteTestCase(id: string): Promise<boolean> {
   if (i === -1) return false;
   mem.cases.splice(i, 1);
   return true;
+}
+
+/** Transition a TestCase status (enforces workflow — see workflow.ts). */
+export async function patchTestCaseStatus(
+  id: string,
+  toStatus: TestCase["status"],
+  by: string,
+): Promise<TestCase | undefined> {
+  const existing = await getTestCase(id);
+  if (!existing) return undefined;
+  const history = appendHistory(existing.statusHistory ?? [], existing.status, toStatus, by);
+  const next: TestCase = { ...existing, status: toStatus, statusHistory: history, updatedAt: new Date().toISOString() };
+  if (USE_DB) {
+    await sql()`update test_cases set
+      status = ${next.status}, status_history = ${JSON.stringify(next.statusHistory)},
+      updated_at = ${next.updatedAt}
+      where id = ${next.id}`;
+  } else {
+    const i = mem.cases.findIndex((c) => c.id === next.id);
+    if (i !== -1) mem.cases[i] = next;
+  }
+  return next;
+}
+
+/** Patch jiraKey on a test case. */
+export async function setTestCaseJiraKey(id: string, jiraKey: string): Promise<TestCase | undefined> {
+  const existing = await getTestCase(id);
+  if (!existing) return undefined;
+  const next: TestCase = { ...existing, jiraKey, updatedAt: new Date().toISOString() };
+  if (USE_DB) {
+    await sql()`update test_cases set jira_key = ${jiraKey}, updated_at = ${next.updatedAt} where id = ${id}`;
+  } else {
+    const i = mem.cases.findIndex((c) => c.id === id);
+    if (i !== -1) mem.cases[i] = next;
+  }
+  return next;
 }
 
 export async function allTags(): Promise<string[]> {
@@ -615,9 +785,10 @@ export async function getTestRun(id: string): Promise<TestRun | undefined> {
 async function insertRun(run: TestRun): Promise<TestRun> {
   if (USE_DB) {
     await sql()`insert into test_runs
-      (id, plan_id, source, suite_name, label, triggered_by, started_at, finished_at, results)
+      (id, plan_id, source, suite_name, label, triggered_by, started_at, finished_at, results, run_status, jira_key, status_history)
       values (${run.id}, ${run.planId ?? null}, ${run.source}, ${run.suiteName ?? null}, ${run.label ?? null},
-              ${run.triggeredBy}, ${run.startedAt}, ${run.finishedAt}, ${JSON.stringify(run.results)})`;
+              ${run.triggeredBy}, ${run.startedAt}, ${run.finishedAt}, ${JSON.stringify(run.results)},
+              ${run.runStatus}, ${run.jiraKey ?? null}, ${JSON.stringify(run.statusHistory)})`;
   } else {
     mem.runs.push(run);
   }
@@ -635,6 +806,8 @@ export async function createTestRun(input: CreateTestRunInput): Promise<TestRun>
     triggeredBy: input.triggeredBy,
     suiteName: input.suiteName,
     label: input.label,
+    runStatus: "created",
+    statusHistory: [],
   });
 }
 
@@ -665,6 +838,8 @@ export async function createRunFromPlan(input: CreateRunFromPlanInput): Promise<
     finishedAt: null,
     triggeredBy: input.triggeredBy,
     label: input.label,
+    runStatus: "in_progress",
+    statusHistory: [{ from: "created", to: "in_progress", by: input.triggeredBy, at: now }],
     results: validCases.map((c) => ({
       testId: c.id,
       title: c.title,
@@ -716,7 +891,174 @@ export async function ingestRun(input: RunnerIngestInput): Promise<TestRun> {
     finishedAt: input.finishedAt,
     results: input.results,
     triggeredBy: input.triggeredBy,
+    runStatus: "completed",
+    statusHistory: [],
   });
+}
+
+/** Transition a run's workflow status. */
+export async function patchRunStatus(
+  runId: string,
+  toStatus: RunWorkflowStatus,
+  by: string,
+): Promise<TestRun | null> {
+  const run = await getTestRun(runId);
+  if (!run) return null;
+  const history = appendHistory(run.statusHistory ?? [], run.runStatus, toStatus, by);
+  const updated: TestRun = { ...run, runStatus: toStatus, statusHistory: history };
+  if (USE_DB) {
+    await sql()`update test_runs set
+      run_status = ${toStatus}, status_history = ${JSON.stringify(history)}
+      where id = ${runId}`;
+  } else {
+    const i = mem.runs.findIndex((r) => r.id === runId);
+    if (i !== -1) mem.runs[i] = updated;
+  }
+  return updated;
+}
+
+/** Patch jiraKey on a run. */
+export async function setRunJiraKey(runId: string, jiraKey: string): Promise<TestRun | null> {
+  const run = await getTestRun(runId);
+  if (!run) return null;
+  const updated: TestRun = { ...run, jiraKey };
+  if (USE_DB) {
+    await sql()`update test_runs set jira_key = ${jiraKey} where id = ${runId}`;
+  } else {
+    const i = mem.runs.findIndex((r) => r.id === runId);
+    if (i !== -1) mem.runs[i] = updated;
+  }
+  return updated;
+}
+
+// ─── Scripts ─────────────────────────────────────────────────────────────────
+
+export interface ScriptFilter {
+  product?: string;
+  status?: string;
+  q?: string;
+}
+
+function applyScriptFilter(rows: TestScript[], filter: ScriptFilter): TestScript[] {
+  return rows
+    .filter((s) => (filter.product ? s.product === filter.product : true))
+    .filter((s) => (filter.status ? s.status === filter.status : true))
+    .filter((s) => (filter.q ? s.name.toLowerCase().includes(filter.q.toLowerCase()) : true))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+export async function listTestScripts(filter: ScriptFilter = {}): Promise<TestScript[]> {
+  if (USE_DB) {
+    const rows = (await sql()`select * from test_scripts`) as unknown[];
+    return applyScriptFilter(rows.map(rowToScript), filter);
+  }
+  return applyScriptFilter(mem.scripts, filter);
+}
+
+export async function getTestScript(id: string): Promise<TestScript | undefined> {
+  if (USE_DB) {
+    const rows = (await sql()`select * from test_scripts where id = ${id}`) as unknown[];
+    return rows[0] ? rowToScript(rows[0]) : undefined;
+  }
+  return mem.scripts.find((s) => s.id === id);
+}
+
+export async function createTestScript(input: CreateTestScriptInput): Promise<TestScript> {
+  const now = new Date().toISOString();
+  const scr: TestScript = {
+    id: `scr-${randomUUID().slice(0, 8)}`,
+    name: input.name,
+    product: input.product,
+    framework: input.framework,
+    specPath: input.specPath,
+    caseKey: input.caseKey,
+    status: input.status,
+    owner: input.owner,
+    statusHistory: [],
+    createdAt: now,
+    updatedAt: now,
+  };
+  if (USE_DB) {
+    await sql()`insert into test_scripts
+      (id, name, product, framework, spec_path, case_key, status, owner, jira_key, status_history, created_at, updated_at)
+      values (${scr.id}, ${scr.name}, ${scr.product}, ${scr.framework}, ${scr.specPath ?? null},
+              ${scr.caseKey ?? null}, ${scr.status}, ${scr.owner}, null, ${JSON.stringify(scr.statusHistory)},
+              ${scr.createdAt}, ${scr.updatedAt})`;
+  } else {
+    mem.scripts.push(scr);
+  }
+  return scr;
+}
+
+export async function updateTestScript(input: UpdateTestScriptInput): Promise<TestScript | undefined> {
+  const existing = await getTestScript(input.id);
+  if (!existing) return undefined;
+  const next: TestScript = {
+    ...existing,
+    name: input.name ?? existing.name,
+    product: input.product ?? existing.product,
+    framework: input.framework ?? existing.framework,
+    specPath: "specPath" in input ? (input.specPath ?? undefined) : existing.specPath,
+    caseKey: "caseKey" in input ? (input.caseKey ?? undefined) : existing.caseKey,
+    status: input.status ?? existing.status,
+    owner: input.owner ?? existing.owner,
+    updatedAt: new Date().toISOString(),
+  };
+  if (USE_DB) {
+    await sql()`update test_scripts set
+      name = ${next.name}, product = ${next.product}, framework = ${next.framework},
+      spec_path = ${next.specPath ?? null}, case_key = ${next.caseKey ?? null},
+      status = ${next.status}, owner = ${next.owner}, updated_at = ${next.updatedAt}
+      where id = ${next.id}`;
+  } else {
+    const i = mem.scripts.findIndex((s) => s.id === next.id);
+    if (i !== -1) mem.scripts[i] = next;
+  }
+  return next;
+}
+
+export async function deleteTestScript(id: string): Promise<boolean> {
+  if (USE_DB) {
+    const rows = (await sql()`delete from test_scripts where id = ${id} returning id`) as unknown[];
+    return rows.length > 0;
+  }
+  const i = mem.scripts.findIndex((s) => s.id === id);
+  if (i === -1) return false;
+  mem.scripts.splice(i, 1);
+  return true;
+}
+
+export async function patchScriptStatus(
+  id: string,
+  toStatus: ScriptStatus,
+  by: string,
+): Promise<TestScript | undefined> {
+  const existing = await getTestScript(id);
+  if (!existing) return undefined;
+  const history = appendHistory(existing.statusHistory ?? [], existing.status, toStatus, by);
+  const next: TestScript = { ...existing, status: toStatus, statusHistory: history, updatedAt: new Date().toISOString() };
+  if (USE_DB) {
+    await sql()`update test_scripts set
+      status = ${toStatus}, status_history = ${JSON.stringify(history)}, updated_at = ${next.updatedAt}
+      where id = ${id}`;
+  } else {
+    const i = mem.scripts.findIndex((s) => s.id === id);
+    if (i !== -1) mem.scripts[i] = next;
+  }
+  return next;
+}
+
+export async function setScriptJiraKey(id: string, jiraKey: string): Promise<TestScript | undefined> {
+  const existing = await getTestScript(id);
+  if (!existing) return undefined;
+  const next: TestScript = { ...existing, jiraKey, updatedAt: new Date().toISOString() };
+  if (USE_DB) {
+    await sql()`update test_scripts set jira_key = ${jiraKey}, updated_at = ${next.updatedAt} where id = ${id}`;
+  } else {
+    const i = mem.scripts.findIndex((s) => s.id === id);
+    if (i !== -1) mem.scripts[i] = next;
+  }
+  return next;
 }
 
 // ─── Source health (lastSeen) ─────────────────────────────────────────────────

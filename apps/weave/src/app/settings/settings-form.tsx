@@ -6,7 +6,8 @@ import { Check } from "lucide-react";
 import type { IntegrationKey, WeaveSettingsView } from "@/lib/integrations";
 import { INTEGRATION_META } from "@/lib/integrations";
 
-const KEYS: IntegrationKey[] = ["eyes", "net", "runner"];
+const STANDARD_KEYS: IntegrationKey[] = ["eyes", "net", "runner"];
+const ATLASSIAN_KEYS: IntegrationKey[] = ["jira", "confluence"];
 const input =
   "w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)] disabled:opacity-40";
 
@@ -15,6 +16,10 @@ interface RowState {
   baseUrl: string;
   token: string;
   tokenSet: boolean;
+  email?: string;
+  projectKey?: string;
+  spaceKey?: string;
+  statusTransitionMap?: string;
 }
 
 /** Format an ISO timestamp as a short relative/absolute label. */
@@ -40,11 +45,13 @@ interface Props {
   lastSeen: Record<IntegrationKey, string | null>;
 }
 
+const ALL_KEYS: IntegrationKey[] = [...STANDARD_KEYS, ...ATLASSIAN_KEYS];
+
 export function SettingsForm({ initial, lastSeen }: Props) {
   const router = useRouter();
   const [rows, setRows] = useState<Record<IntegrationKey, RowState>>(() => {
     const r = {} as Record<IntegrationKey, RowState>;
-    for (const k of KEYS) r[k] = { ...initial[k], token: "" };
+    for (const k of ALL_KEYS) r[k] = { ...initial[k], token: "" };
     return r;
   });
   const [saved, setSaved] = useState(false);
@@ -57,10 +64,16 @@ export function SettingsForm({ initial, lastSeen }: Props) {
 
   async function save() {
     setBusy(true);
-    const payload: Record<string, { enabled: boolean; baseUrl: string; token?: string }> = {};
-    for (const k of KEYS) {
-      payload[k] = { enabled: rows[k].enabled, baseUrl: rows[k].baseUrl };
-      if (rows[k].token) payload[k].token = rows[k].token; // only send if user typed a new one
+    const payload: Record<string, object> = {};
+    for (const k of ALL_KEYS) {
+      const row = rows[k];
+      const entry: Record<string, unknown> = { enabled: row.enabled, baseUrl: row.baseUrl };
+      if (row.token) entry.token = row.token;
+      if (row.email !== undefined) entry.email = row.email;
+      if (row.projectKey !== undefined) entry.projectKey = row.projectKey;
+      if (row.spaceKey !== undefined) entry.spaceKey = row.spaceKey;
+      if (row.statusTransitionMap !== undefined) entry.statusTransitionMap = row.statusTransitionMap;
+      payload[k] = entry;
     }
     const res = await fetch("/api/settings", {
       method: "PUT",
@@ -72,7 +85,7 @@ export function SettingsForm({ initial, lastSeen }: Props) {
       const next = (await res.json()) as WeaveSettingsView;
       setRows((prev) => {
         const r = { ...prev };
-        for (const k of KEYS) r[k] = { ...next[k], token: "" };
+        for (const k of ALL_KEYS) r[k] = { ...next[k], token: "" };
         return r;
       });
       setSaved(true);
@@ -82,10 +95,11 @@ export function SettingsForm({ initial, lastSeen }: Props) {
 
   return (
     <div className="space-y-4">
-      {KEYS.map((k) => {
+      {ALL_KEYS.map((k) => {
         const meta = INTEGRATION_META[k];
         const row = rows[k];
-        const ls = formatLastSeen(lastSeen[k]);
+        const ls = formatLastSeen(lastSeen[k] ?? null);
+        const isAtlassian = k === "jira" || k === "confluence";
         return (
           <div
             key={k}
@@ -95,12 +109,15 @@ export function SettingsForm({ initial, lastSeen }: Props) {
               <div>
                 <div className="flex items-center gap-2">
                   <span className="font-medium">{meta.label}</span>
-                  {/* Health dot */}
-                  <span
-                    className={`inline-block h-2 w-2 rounded-full ${ls.healthy ? "bg-emerald-400" : "bg-zinc-500"}`}
-                    title={ls.healthy ? "Aktivní" : "Žádná data"}
-                  />
-                  <span className="text-xs text-[var(--muted)]">Naposledy: {ls.label}</span>
+                  {!isAtlassian && (
+                    <>
+                      <span
+                        className={`inline-block h-2 w-2 rounded-full ${ls.healthy ? "bg-emerald-400" : "bg-zinc-500"}`}
+                        title={ls.healthy ? "Aktivní" : "Žádná data"}
+                      />
+                      <span className="text-xs text-[var(--muted)]">Naposledy: {ls.label}</span>
+                    </>
+                  )}
                 </div>
                 <p className="mt-0.5 text-xs text-[var(--muted)]">{meta.hint}</p>
               </div>
@@ -140,6 +157,59 @@ export function SettingsForm({ initial, lastSeen }: Props) {
                   placeholder={row.tokenSet ? "•••••••• (ponech prázdné = beze změny)" : "vlož token"}
                 />
               </div>
+              {isAtlassian && (
+                <>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-[var(--muted)]">E-mail (Basic auth)</label>
+                    <input
+                      className={input}
+                      disabled={!row.enabled}
+                      value={row.email ?? ""}
+                      onChange={(e) => patch(k, { email: e.target.value })}
+                      placeholder="you@example.com"
+                    />
+                  </div>
+                  {k === "jira" && (
+                    <>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-[var(--muted)]">Project key</label>
+                        <input
+                          className={input}
+                          disabled={!row.enabled}
+                          value={row.projectKey ?? ""}
+                          onChange={(e) => patch(k, { projectKey: e.target.value })}
+                          placeholder="CEPS"
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <label className="mb-1 block text-xs font-medium text-[var(--muted)]">
+                          Status → Jira transition map (JSON, e.g. {'{'}&#34;active&#34;:&#34;Start Progress&#34;{'}'})
+                        </label>
+                        <textarea
+                          className={input}
+                          disabled={!row.enabled}
+                          rows={2}
+                          value={row.statusTransitionMap ?? "{}"}
+                          onChange={(e) => patch(k, { statusTransitionMap: e.target.value })}
+                          placeholder="{}"
+                        />
+                      </div>
+                    </>
+                  )}
+                  {k === "confluence" && (
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-[var(--muted)]">Space key</label>
+                      <input
+                        className={input}
+                        disabled={!row.enabled}
+                        value={row.spaceKey ?? ""}
+                        onChange={(e) => patch(k, { spaceKey: e.target.value })}
+                        placeholder="CEPS"
+                      />
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </div>
         );

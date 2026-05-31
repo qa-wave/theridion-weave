@@ -1,7 +1,15 @@
 import { NextResponse } from "next/server";
-import { updateTestCaseSchema, patchTestCaseStatusSchema } from "@/lib/validation";
-import { deleteTestCase, getTestCase, updateTestCase, patchTestCaseStatus } from "@/data/store";
-import { canTransitionTest } from "@/lib/workflow";
+import {
+  updateTestScriptSchema,
+  patchScriptStatusSchema,
+} from "@/lib/validation";
+import {
+  deleteTestScript,
+  getTestScript,
+  updateTestScript,
+  patchScriptStatus,
+} from "@/data/store";
+import { canTransitionScript } from "@/lib/workflow";
 import { logger } from "@/lib/logger";
 
 const unavailable = () =>
@@ -13,11 +21,11 @@ const unavailable = () =>
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   try {
-    const tc = await getTestCase(id);
-    if (!tc) return NextResponse.json({ error: "Nenalezeno" }, { status: 404 });
-    return NextResponse.json(tc);
+    const scr = await getTestScript(id);
+    if (!scr) return NextResponse.json({ error: "Nenalezeno" }, { status: 404 });
+    return NextResponse.json(scr);
   } catch (e) {
-    logger.error("GET /api/cases/[id] failed", e);
+    logger.error("GET /api/scripts/[id] failed", e);
     return unavailable();
   }
 }
@@ -31,14 +39,14 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ error: "Neplatný JSON" }, { status: 400 });
   }
 
-  // Pure status transition?
-  const statusParsed = patchTestCaseStatusSchema.safeParse(body);
+  // Check if this is a status transition patch
+  const statusParsed = patchScriptStatusSchema.safeParse(body);
   if (statusParsed.success && Object.keys(body as object).every((k) => ["status", "by"].includes(k))) {
     try {
-      const existing = await getTestCase(id);
+      const existing = await getTestScript(id);
       if (!existing) return NextResponse.json({ error: "Nenalezeno" }, { status: 404 });
       const { status: toStatus, by } = statusParsed.data;
-      if (!canTransitionTest(existing.status, toStatus)) {
+      if (!canTransitionScript(existing.status, toStatus)) {
         return NextResponse.json(
           {
             error: "Přechod stavu není povolen",
@@ -49,50 +57,26 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
           { status: 409 },
         );
       }
-      const updated = await patchTestCaseStatus(id, toStatus, by);
+      const updated = await patchScriptStatus(id, toStatus, by);
       if (!updated) return NextResponse.json({ error: "Nenalezeno" }, { status: 404 });
       return NextResponse.json(updated);
     } catch (e) {
-      logger.error("PATCH /api/cases/[id] status failed", e);
+      logger.error("PATCH /api/scripts/[id] status failed", e);
       return unavailable();
     }
   }
 
-  // If status is part of a full update, validate the transition
-  const bodyObj = body as Record<string, unknown>;
-  if (bodyObj.status !== undefined) {
-    try {
-      const existing = await getTestCase(id);
-      if (existing) {
-        const toStatus = bodyObj.status as string;
-        if (existing.status !== toStatus && !canTransitionTest(existing.status, toStatus as Parameters<typeof canTransitionTest>[1])) {
-          return NextResponse.json(
-            {
-              error: "Přechod stavu není povolen",
-              from: existing.status,
-              to: toStatus,
-              code: "invalid_transition",
-            },
-            { status: 409 },
-          );
-        }
-      }
-    } catch (e) {
-      logger.error("PATCH /api/cases/[id] pre-check failed", e);
-      return unavailable();
-    }
-  }
-
-  const parsed = updateTestCaseSchema.safeParse({ ...(body as object), id });
+  // Regular field update
+  const parsed = updateTestScriptSchema.safeParse({ ...(body as object), id });
   if (!parsed.success) {
     return NextResponse.json({ error: "Validace selhala", issues: parsed.error.flatten() }, { status: 422 });
   }
   try {
-    const updated = await updateTestCase(parsed.data);
+    const updated = await updateTestScript(parsed.data);
     if (!updated) return NextResponse.json({ error: "Nenalezeno" }, { status: 404 });
     return NextResponse.json(updated);
   } catch (e) {
-    logger.error("PATCH /api/cases/[id] failed", e);
+    logger.error("PATCH /api/scripts/[id] failed", e);
     return unavailable();
   }
 }
@@ -100,11 +84,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   try {
-    const ok = await deleteTestCase(id);
+    const ok = await deleteTestScript(id);
     if (!ok) return NextResponse.json({ error: "Nenalezeno" }, { status: 404 });
     return NextResponse.json({ deleted: id });
   } catch (e) {
-    logger.error("DELETE /api/cases/[id] failed", e);
+    logger.error("DELETE /api/scripts/[id] failed", e);
     return unavailable();
   }
 }

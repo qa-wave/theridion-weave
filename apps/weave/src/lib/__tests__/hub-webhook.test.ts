@@ -10,6 +10,8 @@ const sampleRun: TestRun = {
   triggeredBy: "ci/eyes",
   startedAt: "2026-05-31T10:00:00.000Z",
   finishedAt: "2026-05-31T10:00:05.000Z",
+  runStatus: "completed",
+  statusHistory: [],
   results: [
     { testId: "t1", title: "login renders", status: "pass", durationMs: 1900 },
     { testId: "t2", title: "lockout", status: "fail", durationMs: 3100, notes: "banner missing", issueUrl: "https://github.com/issues/1" },

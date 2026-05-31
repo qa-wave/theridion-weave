@@ -84,5 +84,7 @@ export function normalizeRunResult(rr: RunResultV2): TestRun {
         q.error ??
         (q.status_code ? `${q.method ?? ""} ${q.url ?? ""} → ${q.status_code}`.trim() : undefined),
     })),
+    runStatus: "completed" as const,
+    statusHistory: [],
   };
 }

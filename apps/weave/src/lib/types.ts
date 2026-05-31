@@ -1,8 +1,31 @@
 // ─── Core domain types for Theridion Weave ───────────────────────────────────
 
-export type TestCaseStatus = "draft" | "active" | "deprecated";
+export type TestCaseStatus = "draft" | "in_review" | "active" | "deprecated";
 export type TestCasePriority = "low" | "medium" | "high" | "critical";
 export type TestCaseType = "manual";
+
+// ─── Script entity ────────────────────────────────────────────────────────────
+
+export type ScriptProduct = "eyes" | "net";
+export type ScriptStatus = "draft" | "active" | "flaky" | "deprecated";
+
+export interface TestScript {
+  id: string;
+  name: string;
+  product: ScriptProduct;
+  framework: string;
+  specPath?: string;
+  /** Optional link to a manual TestCase */
+  caseKey?: string;
+  status: ScriptStatus;
+  owner: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Jira issue key (e.g. "CEPS-42") set after mirror sync */
+  jiraKey?: string;
+  /** Status-change audit trail */
+  statusHistory: import("./workflow").StatusHistoryEntry[];
+}
 
 export interface TestStep {
   order: number;
@@ -29,6 +52,10 @@ export interface TestCase {
   caseKey?: string;
   createdAt: string;
   updatedAt: string;
+  /** Jira issue key set after mirror sync */
+  jiraKey?: string;
+  /** Status-change audit trail */
+  statusHistory: import("./workflow").StatusHistoryEntry[];
 }
 
 // ─── Test Plans / Suites ──────────────────────────────────────────────────────
@@ -45,6 +72,7 @@ export interface TestPlan {
 // ─── Test Runs ────────────────────────────────────────────────────────────────
 
 export type RunSource = "manual" | "eyes" | "net" | "runner";
+export type RunWorkflowStatus = "created" | "in_progress" | "completed" | "signed_off" | "blocked";
 export type ResultStatus = "pass" | "fail" | "skip" | "blocked";
 
 export interface TestResult {
@@ -76,6 +104,12 @@ export interface TestRun {
   label?: string;
   /** Optional milestone tag (e.g. "v2.4.0") for aggregation grouping */
   milestone?: string;
+  /** Workflow status (separate from completion) */
+  runStatus: RunWorkflowStatus;
+  /** Jira issue key set after mirror sync */
+  jiraKey?: string;
+  /** Status-change audit trail */
+  statusHistory: import("./workflow").StatusHistoryEntry[];
 }
 
 // ─── Ingest payload (mirrors what Runner publishes to Hub) ────────────────────

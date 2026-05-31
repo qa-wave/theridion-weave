@@ -2,15 +2,17 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, ListChecks, FolderKanban, PlayCircle, Settings, BookText } from "lucide-react";
+import { LayoutDashboard, ListChecks, FolderKanban, PlayCircle, Settings, BookText, Code2, Link2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const items = [
   { href: "/", label: "Přehled", icon: LayoutDashboard },
   { href: "/cases", label: "Test cases", icon: ListChecks },
+  { href: "/scripts", label: "Skripty", icon: Code2 },
   { href: "/plans", label: "Plány", icon: FolderKanban },
   { href: "/runs", label: "Běhy", icon: PlayCircle },
   { href: "/requirements", label: "Požadavky", icon: BookText },
+  { href: "/jira", label: "Jira", icon: Link2 },
   { href: "/settings", label: "Nastavení", icon: Settings },
 ];
 
