@@ -38,7 +38,7 @@ export interface TestPlan {
 
 // ─── Test Runs ────────────────────────────────────────────────────────────────
 
-export type RunSource = "manual" | "eyes" | "net";
+export type RunSource = "manual" | "eyes" | "net" | "runner";
 export type ResultStatus = "pass" | "fail" | "skip" | "blocked";
 
 export interface TestResult {

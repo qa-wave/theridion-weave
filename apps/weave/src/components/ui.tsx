@@ -80,6 +80,7 @@ const sourceMeta: Record<RunSource, { label: string; cls: string }> = {
   manual: { label: "Manual", cls: "bg-violet-500/15 text-violet-300 border-violet-500/30" },
   eyes: { label: "Eyes", cls: "bg-cyan-500/15 text-cyan-300 border-cyan-500/30" },
   net: { label: "Net", cls: "bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/30" },
+  runner: { label: "Runner", cls: "bg-amber-500/15 text-amber-300 border-amber-500/30" },
 };
 
 export function SourceBadge({ source }: { source: RunSource }) {

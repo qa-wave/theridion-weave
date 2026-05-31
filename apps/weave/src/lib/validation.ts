@@ -53,7 +53,7 @@ export const createTestRunSchema = z.object({
 });
 
 export const runnerIngestSchema = z.object({
-  source: z.enum(["manual", "eyes", "net"]),
+  source: z.enum(["manual", "eyes", "net", "runner"]),
   suiteName: z.string(),
   label: z.string().optional(),
   triggeredBy: z.string(),

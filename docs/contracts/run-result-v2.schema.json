@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qawave.ai/contracts/run-result-v2.schema.json",
+  "title": "Theridion RunResult v2",
+  "description": "Canonical cross-product wire contract. Producers: Runner, Eyes, Net. Consumers: Hub /api/ingest, Weave /api/runs/ingest. Keep Runner pydantic, Hub zod and Weave zod in sync with this file (Phase 0 anti-drift).",
+  "type": "object",
+  "required": ["schema_version", "run_id", "product", "started_at", "requests"],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "run_id": { "type": "string", "description": "UUID; also used as Idempotency-Key on POST" },
+    "product": { "enum": ["net", "eyes", "runner"] },
+    "suite_type": { "enum": ["unit", "integration", "e2e", "smoke", "load", "security", "visual"] },
+    "collection_id": { "type": "string" },
+    "collection_name": { "type": "string" },
+    "environment": { "type": "string" },
+    "branch": { "type": "string" },
+    "started_at": { "type": "string", "format": "date-time" },
+    "finished_at": { "type": "string", "format": "date-time" },
+    "duration_ms": { "type": "number" },
+    "total": { "type": "integer" },
+    "passed": { "type": "integer" },
+    "failed": { "type": "integer" },
+    "flaky": { "type": "integer" },
+    "requests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "status"],
+        "properties": {
+          "request_id": { "type": "string" },
+          "name": { "type": "string" },
+          "method": { "type": "string" },
+          "url": { "type": "string" },
+          "status_code": { "type": "integer" },
+          "status": { "enum": ["pass", "fail", "skip", "blocked"] },
+          "duration_ms": { "type": "number" },
+          "test_key": { "type": "string", "description": "stable key; maps to Weave TestCase.caseKey for coverage" },
+          "browser": { "type": "string" },
+          "evidence": { "type": "string", "description": "artifact URL (screenshot/diff/trace)" },
+          "error": { "type": "string" }
+        }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "properties": {
+        "git_sha": { "type": "string" },
+        "report_url": { "type": "string" },
+        "weave_case_key": { "type": "string" },
+        "triggered_by": { "type": "string" }
+      }
+    }
+  }
+}

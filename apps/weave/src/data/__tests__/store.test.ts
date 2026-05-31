@@ -59,6 +59,6 @@ describe("store — aggregation", () => {
 
   it("totals cover all three sources", async () => {
     const t = await totalsBySource();
-    expect(t.map((x) => x.source).sort()).toEqual(["eyes", "manual", "net"]);
+    expect(t.map((x) => x.source).sort()).toEqual(["eyes", "manual", "net", "runner"]);
   });
 });

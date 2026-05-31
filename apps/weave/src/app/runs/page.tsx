@@ -11,7 +11,8 @@ interface SearchParams {
 
 export default async function RunsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
-  const source = sp.source === "eyes" || sp.source === "net" || sp.source === "manual" ? sp.source : undefined;
+  const source =
+    sp.source === "eyes" || sp.source === "net" || sp.source === "manual" || sp.source === "runner" ? sp.source : undefined;
   const runs = await listTestRuns(source);
 
   return (
@@ -26,6 +27,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
         <SourceFilter value="manual" current={source} label="Manual" />
         <SourceFilter value="eyes" current={source} label="Eyes" />
         <SourceFilter value="net" current={source} label="Net" />
+        <SourceFilter value="runner" current={source} label="Runner" />
       </div>
 
       <div className="space-y-4">

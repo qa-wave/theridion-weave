@@ -516,6 +516,14 @@ export async function listTestRuns(source?: RunSource): Promise<TestRun[]> {
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }
 
+export async function getTestRun(id: string): Promise<TestRun | undefined> {
+  if (USE_DB) {
+    const rows = (await sql()`select * from test_runs where id = ${id}`) as unknown[];
+    return rows[0] ? rowToRun(rows[0]) : undefined;
+  }
+  return mem.runs.find((r) => r.id === id);
+}
+
 async function insertRun(run: TestRun): Promise<TestRun> {
   if (USE_DB) {
     await sql()`insert into test_runs
@@ -540,6 +548,14 @@ export async function createTestRun(input: CreateTestRunInput): Promise<TestRun>
     suiteName: input.suiteName,
     label: input.label,
   });
+}
+
+/** Idempotently persist a normalized run (id = canonical run_id). */
+export async function saveIngestedRun(run: TestRun): Promise<{ created: boolean; run: TestRun }> {
+  const existing = await getTestRun(run.id);
+  if (existing) return { created: false, run: existing };
+  await insertRun(run);
+  return { created: true, run };
 }
 
 /** Accept a run published by Eyes/Net via Runner (same payload shape). */
@@ -589,7 +605,7 @@ export interface SourceTotals {
 
 export async function totalsBySource(): Promise<SourceTotals[]> {
   const runs = await listTestRuns();
-  const sources: RunSource[] = ["manual", "eyes", "net"];
+  const sources: RunSource[] = ["manual", "eyes", "net", "runner"];
   return sources.map((source) => {
     const results = runs.filter((r) => r.source === source).flatMap((r) => r.results);
     return {
