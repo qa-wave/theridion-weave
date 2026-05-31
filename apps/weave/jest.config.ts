@@ -20,6 +20,7 @@ const config: Config = {
     ],
   },
   moduleNameMapper: {
+    "^@neondatabase/serverless$": "<rootDir>/src/__mocks__/neon.js",
     "^@/(.*)$": "<rootDir>/src/$1",
     "\\.(css|less|scss)$": "<rootDir>/src/__mocks__/style.js",
   },

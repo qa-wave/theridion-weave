@@ -21,3 +21,17 @@ projekt používá [sémantické verzování](https://semver.org/lang/cs/).
 - jest testy datové vrstvy a utilit; CI (typecheck + lint + jest).
 - Vznik jako součást konsolidace Theridion rodiny pod umbrellu `theridion/`
   (theridion-net, theridion-eyes, theridion-hub, theridion-runner, theridion-weave).
+
+### Production hardening
+
+- **Durable-by-default storage**: datová vrstva běží nad Neon Postgres když je
+  `DATABASE_URL` nastaven, jinak in-memory seed ("demo mode"). Stejné async API.
+  Bootstrap přes `POST /api/db/migrate` a `POST /api/db/seed` (token-guarded).
+- **Auth**: single-password session (HMAC cookie) aktivní když je nastaveno
+  `WEAVE_ACCESS_PASSWORD` + `SESSION_SECRET`; jinak otevřený demo režim. `/login`,
+  gating v `proxy.ts`.
+- **Ingest fail-safe**: v produkci bez `WEAVE_INGEST_TOKEN` vrací `/api/runs/ingest` 503.
+- **/api/health** pro smoke testy (status + storage mód) + post-deploy `smoke-weave.yml`.
+- Error handling na API (503 + Retry-After), structured logger, empty states a
+  "Demo mode" banner.
+- Deploy config: `vercel.json` (framework/build/region fra1).

@@ -12,7 +12,7 @@ interface SearchParams {
 export default async function RunsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
   const source = sp.source === "eyes" || sp.source === "net" || sp.source === "manual" ? sp.source : undefined;
-  const runs = listTestRuns(source);
+  const runs = await listTestRuns(source);
 
   return (
     <>
@@ -29,6 +29,11 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
       </div>
 
       <div className="space-y-4">
+        {runs.length === 0 && (
+          <Card className="py-10 text-center text-sm text-[var(--muted)]">
+            Zatím žádné běhy. Spusť testy v Eyes/Net a nasměruj Runner na <code>/api/runs/ingest</code>, nebo přidej manuální běh přes API.
+          </Card>
+        )}
         {runs.map((run) => {
           const s = summariseRun(run);
           return (

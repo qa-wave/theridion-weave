@@ -1,11 +1,12 @@
-// ─── In-memory data store with seed fallback ─────────────────────────────────
+// ─── Data store: durable (Neon) with in-memory seed fallback ──────────────────
 //
-// Weave's MVP persistence. When DATABASE_URL is set the same shapes can be
-// served from Neon (see src/lib/db.ts); until then this in-memory store is the
-// source of truth and is seeded with representative data so every screen has
-// something to show. State lives for the lifetime of the server process.
+// When DATABASE_URL is set, all reads/writes go to Neon Postgres (durable).
+// Without it, the app runs in "demo mode" against an in-memory seed — data does
+// not survive a restart. The facade is async in both modes so call sites are
+// identical regardless of backend.
 
 import { randomUUID } from "node:crypto";
+import { neon } from "@neondatabase/serverless";
 import type {
   CoverageSummary,
   RunSource,
@@ -23,14 +24,137 @@ import type {
 } from "@/lib/validation";
 import { summariseRun } from "@/lib/utils";
 
+const USE_DB = !!process.env.DATABASE_URL;
+
+export function isDurable(): boolean {
+  return USE_DB;
+}
+
+// ─── Neon client (lazy) ───────────────────────────────────────────────────────
+
+let _sql: ReturnType<typeof neon> | null = null;
+function sql() {
+  if (!_sql) {
+    if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is not set");
+    _sql = neon(process.env.DATABASE_URL);
+  }
+  return _sql;
+}
+
+/** CREATE TABLE IF NOT EXISTS — idempotent schema bootstrap. */
+export async function migrate(): Promise<void> {
+  const q = sql();
+  await q`create table if not exists test_cases (
+    id text primary key,
+    title text not null,
+    description text not null default '',
+    steps jsonb not null default '[]',
+    expected_result text not null default '',
+    priority text not null default 'medium',
+    tags jsonb not null default '[]',
+    status text not null default 'draft',
+    owner text not null,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`;
+  await q`create table if not exists test_plans (
+    id text primary key,
+    name text not null,
+    description text not null default '',
+    test_case_ids jsonb not null default '[]',
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`;
+  await q`create table if not exists test_runs (
+    id text primary key,
+    plan_id text,
+    source text not null,
+    suite_name text,
+    label text,
+    triggered_by text not null,
+    started_at timestamptz not null,
+    finished_at timestamptz,
+    results jsonb not null default '[]'
+  )`;
+  await q`create index if not exists test_runs_source_started_idx on test_runs (source, started_at desc)`;
+}
+
+/** Insert the demo dataset into Neon (idempotent — skips existing IDs). */
+export async function seedDatabase(): Promise<{ cases: number; plans: number; runs: number }> {
+  const q = sql();
+  const data = seed();
+  for (const c of data.cases) {
+    await q`insert into test_cases
+      (id, title, description, steps, expected_result, priority, tags, status, owner, created_at, updated_at)
+      values (${c.id}, ${c.title}, ${c.description}, ${JSON.stringify(c.steps)}, ${c.expectedResult},
+              ${c.priority}, ${JSON.stringify(c.tags)}, ${c.status}, ${c.owner}, ${c.createdAt}, ${c.updatedAt})
+      on conflict (id) do nothing`;
+  }
+  for (const p of data.plans) {
+    await q`insert into test_plans (id, name, description, test_case_ids, created_at, updated_at)
+      values (${p.id}, ${p.name}, ${p.description}, ${JSON.stringify(p.testCaseIds)}, ${p.createdAt}, ${p.updatedAt})
+      on conflict (id) do nothing`;
+  }
+  for (const r of data.runs) {
+    await q`insert into test_runs
+      (id, plan_id, source, suite_name, label, triggered_by, started_at, finished_at, results)
+      values (${r.id}, ${r.planId ?? null}, ${r.source}, ${r.suiteName ?? null}, ${r.label ?? null},
+              ${r.triggeredBy}, ${r.startedAt}, ${r.finishedAt}, ${JSON.stringify(r.results)})
+      on conflict (id) do nothing`;
+  }
+  return { cases: data.cases.length, plans: data.plans.length, runs: data.runs.length };
+}
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function rowToCase(r: any): TestCase {
+  return {
+    id: r.id,
+    title: r.title,
+    description: r.description,
+    steps: r.steps ?? [],
+    expectedResult: r.expected_result,
+    priority: r.priority,
+    tags: r.tags ?? [],
+    status: r.status,
+    type: "manual",
+    owner: r.owner,
+    createdAt: new Date(r.created_at).toISOString(),
+    updatedAt: new Date(r.updated_at).toISOString(),
+  };
+}
+function rowToPlan(r: any): TestPlan {
+  return {
+    id: r.id,
+    name: r.name,
+    description: r.description,
+    testCaseIds: r.test_case_ids ?? [],
+    createdAt: new Date(r.created_at).toISOString(),
+    updatedAt: new Date(r.updated_at).toISOString(),
+  };
+}
+function rowToRun(r: any): TestRun {
+  return {
+    id: r.id,
+    planId: r.plan_id ?? undefined,
+    source: r.source,
+    suiteName: r.suite_name ?? undefined,
+    label: r.label ?? undefined,
+    triggeredBy: r.triggered_by,
+    startedAt: new Date(r.started_at).toISOString(),
+    finishedAt: r.finished_at ? new Date(r.finished_at).toISOString() : null,
+    results: r.results ?? [],
+  };
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+// ─── In-memory seed (demo mode) ───────────────────────────────────────────────
+
 interface Store {
   cases: TestCase[];
   plans: TestPlan[];
   runs: TestRun[];
 }
 
-// Deterministic seed timestamps (relative offsets from a fixed anchor) so the
-// dashboard renders stable data without depending on wall-clock during build.
 const DAY = 86_400_000;
 const anchor = Date.UTC(2026, 4, 30, 9, 0, 0); // 2026-05-30T09:00:00Z
 const at = (offsetDays: number, offsetMs = 0) =>
@@ -201,9 +325,13 @@ function seed(): Store {
   return { cases, plans, runs };
 }
 
-// Persist across hot-reloads in dev by stashing on globalThis.
 const g = globalThis as unknown as { __weaveStore?: Store };
-const store: Store = g.__weaveStore ?? (g.__weaveStore = seed());
+const mem: Store = g.__weaveStore ?? (g.__weaveStore = seed());
+
+/** Exported for the seed script — returns the canonical demo dataset. */
+export function seedData(): Store {
+  return seed();
+}
 
 // ─── Test cases ───────────────────────────────────────────────────────────────
 
@@ -214,22 +342,32 @@ export interface CaseFilter {
   q?: string;
 }
 
-export function listTestCases(filter: CaseFilter = {}): TestCase[] {
-  return store.cases
+function applyCaseFilter(rows: TestCase[], filter: CaseFilter): TestCase[] {
+  return rows
     .filter((c) => (filter.status ? c.status === filter.status : true))
     .filter((c) => (filter.priority ? c.priority === filter.priority : true))
     .filter((c) => (filter.tag ? c.tags.includes(filter.tag) : true))
-    .filter((c) =>
-      filter.q ? c.title.toLowerCase().includes(filter.q.toLowerCase()) : true,
-    )
+    .filter((c) => (filter.q ? c.title.toLowerCase().includes(filter.q.toLowerCase()) : true))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
-export function getTestCase(id: string): TestCase | undefined {
-  return store.cases.find((c) => c.id === id);
+export async function listTestCases(filter: CaseFilter = {}): Promise<TestCase[]> {
+  if (USE_DB) {
+    const rows = (await sql()`select * from test_cases`) as unknown[];
+    return applyCaseFilter(rows.map(rowToCase), filter);
+  }
+  return applyCaseFilter(mem.cases, filter);
 }
 
-export function createTestCase(input: CreateTestCaseInput): TestCase {
+export async function getTestCase(id: string): Promise<TestCase | undefined> {
+  if (USE_DB) {
+    const rows = (await sql()`select * from test_cases where id = ${id}`) as unknown[];
+    return rows[0] ? rowToCase(rows[0]) : undefined;
+  }
+  return mem.cases.find((c) => c.id === id);
+}
+
+export async function createTestCase(input: CreateTestCaseInput): Promise<TestCase> {
   const now = new Date().toISOString();
   const tc: TestCase = {
     id: `tc-${randomUUID().slice(0, 8)}`,
@@ -245,49 +383,81 @@ export function createTestCase(input: CreateTestCaseInput): TestCase {
     createdAt: now,
     updatedAt: now,
   };
-  store.cases.push(tc);
+  if (USE_DB) {
+    await sql()`insert into test_cases
+      (id, title, description, steps, expected_result, priority, tags, status, owner, created_at, updated_at)
+      values (${tc.id}, ${tc.title}, ${tc.description}, ${JSON.stringify(tc.steps)},
+              ${tc.expectedResult}, ${tc.priority}, ${JSON.stringify(tc.tags)}, ${tc.status},
+              ${tc.owner}, ${tc.createdAt}, ${tc.updatedAt})`;
+  } else {
+    mem.cases.push(tc);
+  }
   return tc;
 }
 
-export function updateTestCase(input: UpdateTestCaseInput): TestCase | undefined {
-  const tc = getTestCase(input.id);
-  if (!tc) return undefined;
-  Object.assign(tc, {
-    title: input.title ?? tc.title,
-    description: input.description ?? tc.description,
-    steps: input.steps ?? tc.steps,
-    expectedResult: input.expectedResult ?? tc.expectedResult,
-    priority: input.priority ?? tc.priority,
-    tags: input.tags ?? tc.tags,
-    status: input.status ?? tc.status,
-    owner: input.owner ?? tc.owner,
+export async function updateTestCase(input: UpdateTestCaseInput): Promise<TestCase | undefined> {
+  const existing = await getTestCase(input.id);
+  if (!existing) return undefined;
+  const next: TestCase = {
+    ...existing,
+    title: input.title ?? existing.title,
+    description: input.description ?? existing.description,
+    steps: input.steps ?? existing.steps,
+    expectedResult: input.expectedResult ?? existing.expectedResult,
+    priority: input.priority ?? existing.priority,
+    tags: input.tags ?? existing.tags,
+    status: input.status ?? existing.status,
+    owner: input.owner ?? existing.owner,
     updatedAt: new Date().toISOString(),
-  });
-  return tc;
+  };
+  if (USE_DB) {
+    await sql()`update test_cases set
+      title = ${next.title}, description = ${next.description}, steps = ${JSON.stringify(next.steps)},
+      expected_result = ${next.expectedResult}, priority = ${next.priority}, tags = ${JSON.stringify(next.tags)},
+      status = ${next.status}, owner = ${next.owner}, updated_at = ${next.updatedAt}
+      where id = ${next.id}`;
+  } else {
+    const i = mem.cases.findIndex((c) => c.id === next.id);
+    if (i !== -1) mem.cases[i] = next;
+  }
+  return next;
 }
 
-export function deleteTestCase(id: string): boolean {
-  const i = store.cases.findIndex((c) => c.id === id);
+export async function deleteTestCase(id: string): Promise<boolean> {
+  if (USE_DB) {
+    const rows = (await sql()`delete from test_cases where id = ${id} returning id`) as unknown[];
+    return rows.length > 0;
+  }
+  const i = mem.cases.findIndex((c) => c.id === id);
   if (i === -1) return false;
-  store.cases.splice(i, 1);
+  mem.cases.splice(i, 1);
   return true;
 }
 
-export function allTags(): string[] {
-  return [...new Set(store.cases.flatMap((c) => c.tags))].sort();
+export async function allTags(): Promise<string[]> {
+  const cases = await listTestCases();
+  return [...new Set(cases.flatMap((c) => c.tags))].sort();
 }
 
 // ─── Plans ──────────────────────────────────────────────────────────────────
 
-export function listTestPlans(): TestPlan[] {
-  return [...store.plans].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+export async function listTestPlans(): Promise<TestPlan[]> {
+  if (USE_DB) {
+    const rows = (await sql()`select * from test_plans order by updated_at desc`) as unknown[];
+    return rows.map(rowToPlan);
+  }
+  return [...mem.plans].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
-export function getTestPlan(id: string): TestPlan | undefined {
-  return store.plans.find((p) => p.id === id);
+export async function getTestPlan(id: string): Promise<TestPlan | undefined> {
+  if (USE_DB) {
+    const rows = (await sql()`select * from test_plans where id = ${id}`) as unknown[];
+    return rows[0] ? rowToPlan(rows[0]) : undefined;
+  }
+  return mem.plans.find((p) => p.id === id);
 }
 
-export function createTestPlan(input: CreateTestPlanInput): TestPlan {
+export async function createTestPlan(input: CreateTestPlanInput): Promise<TestPlan> {
   const now = new Date().toISOString();
   const tp: TestPlan = {
     id: `tp-${randomUUID().slice(0, 8)}`,
@@ -297,24 +467,43 @@ export function createTestPlan(input: CreateTestPlanInput): TestPlan {
     createdAt: now,
     updatedAt: now,
   };
-  store.plans.push(tp);
+  if (USE_DB) {
+    await sql()`insert into test_plans (id, name, description, test_case_ids, created_at, updated_at)
+      values (${tp.id}, ${tp.name}, ${tp.description}, ${JSON.stringify(tp.testCaseIds)}, ${tp.createdAt}, ${tp.updatedAt})`;
+  } else {
+    mem.plans.push(tp);
+  }
   return tp;
 }
 
 // ─── Runs ─────────────────────────────────────────────────────────────────────
 
-export function listTestRuns(source?: RunSource): TestRun[] {
-  return store.runs
+export async function listTestRuns(source?: RunSource): Promise<TestRun[]> {
+  if (USE_DB) {
+    const rows = source
+      ? ((await sql()`select * from test_runs where source = ${source} order by started_at desc`) as unknown[])
+      : ((await sql()`select * from test_runs order by started_at desc`) as unknown[]);
+    return rows.map(rowToRun);
+  }
+  return mem.runs
     .filter((r) => (source ? r.source === source : true))
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }
 
-export function getTestRun(id: string): TestRun | undefined {
-  return store.runs.find((r) => r.id === id);
+async function insertRun(run: TestRun): Promise<TestRun> {
+  if (USE_DB) {
+    await sql()`insert into test_runs
+      (id, plan_id, source, suite_name, label, triggered_by, started_at, finished_at, results)
+      values (${run.id}, ${run.planId ?? null}, ${run.source}, ${run.suiteName ?? null}, ${run.label ?? null},
+              ${run.triggeredBy}, ${run.startedAt}, ${run.finishedAt}, ${JSON.stringify(run.results)})`;
+  } else {
+    mem.runs.push(run);
+  }
+  return run;
 }
 
-export function createTestRun(input: CreateTestRunInput): TestRun {
-  const run: TestRun = {
+export async function createTestRun(input: CreateTestRunInput): Promise<TestRun> {
+  return insertRun({
     id: `run-${randomUUID().slice(0, 8)}`,
     planId: input.planId,
     source: input.source,
@@ -324,14 +513,12 @@ export function createTestRun(input: CreateTestRunInput): TestRun {
     triggeredBy: input.triggeredBy,
     suiteName: input.suiteName,
     label: input.label,
-  };
-  store.runs.push(run);
-  return run;
+  });
 }
 
 /** Accept a run published by Eyes/Net via Runner (same payload shape). */
-export function ingestRun(input: RunnerIngestInput): TestRun {
-  const run: TestRun = {
+export async function ingestRun(input: RunnerIngestInput): Promise<TestRun> {
+  return insertRun({
     id: `run-${randomUUID().slice(0, 8)}`,
     source: input.source,
     suiteName: input.suiteName,
@@ -340,30 +527,25 @@ export function ingestRun(input: RunnerIngestInput): TestRun {
     finishedAt: input.finishedAt,
     results: input.results,
     triggeredBy: input.triggeredBy,
-  };
-  store.runs.push(run);
-  return run;
+  });
 }
 
 // ─── Aggregation ──────────────────────────────────────────────────────────────
 
-export function recentRunSummaries(limit = 10): RunSummary[] {
-  return listTestRuns()
-    .slice(0, limit)
-    .map(summariseRun);
+export async function recentRunSummaries(limit = 10): Promise<RunSummary[]> {
+  const runs = await listTestRuns();
+  return runs.slice(0, limit).map(summariseRun);
 }
 
-export function coverage(): CoverageSummary {
-  const active = store.cases.filter((c) => c.status === "active");
-  // a case is "covered" if any manual run has a passing result for it
+export async function coverage(): Promise<CoverageSummary> {
+  const [cases, runs] = await Promise.all([listTestCases(), listTestRuns("manual")]);
+  const active = cases.filter((c) => c.status === "active");
   const passedCaseIds = new Set(
-    store.runs
-      .filter((r) => r.source === "manual")
-      .flatMap((r) => r.results.filter((res) => res.status === "pass").map((res) => res.testId)),
+    runs.flatMap((r) => r.results.filter((res) => res.status === "pass").map((res) => res.testId)),
   );
   const covered = active.filter((c) => passedCaseIds.has(c.id)).length;
   return {
-    total: store.cases.length,
+    total: cases.length,
     active: active.length,
     covered,
     coveragePct: active.length === 0 ? 0 : (covered / active.length) * 100,
@@ -379,10 +561,11 @@ export interface SourceTotals {
   total: number;
 }
 
-export function totalsBySource(): SourceTotals[] {
+export async function totalsBySource(): Promise<SourceTotals[]> {
+  const runs = await listTestRuns();
   const sources: RunSource[] = ["manual", "eyes", "net"];
   return sources.map((source) => {
-    const results = store.runs.filter((r) => r.source === source).flatMap((r) => r.results);
+    const results = runs.filter((r) => r.source === source).flatMap((r) => r.results);
     return {
       source,
       pass: results.filter((r) => r.status === "pass").length,

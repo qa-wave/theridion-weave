@@ -14,8 +14,9 @@ interface SearchParams {
 
 export default async function CasesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
-  const cases = listTestCases(sp);
-  const tags = allTags();
+  const cases = await listTestCases(sp);
+  const tags = await allTags();
+  const hasFilter = Boolean(sp.tag || sp.priority || sp.status);
 
   return (
     <>
@@ -49,7 +50,20 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
 
       <Card className="p-0">
         <div className="divide-y divide-[var(--border)]">
-          {cases.length === 0 && <div className="p-6 text-sm text-[var(--muted)]">Žádné test cases neodpovídají filtru.</div>}
+          {cases.length === 0 && (
+            <div className="flex flex-col items-center gap-3 p-10 text-center text-sm text-[var(--muted)]">
+              {hasFilter ? (
+                <>Žádné test cases neodpovídají filtru.</>
+              ) : (
+                <>
+                  <span>Zatím žádné test cases.</span>
+                  <Link href="/cases/new" className="text-[var(--accent)] hover:underline">
+                    + Vytvořit první test case
+                  </Link>
+                </>
+              )}
+            </div>
+          )}
           {cases.map((c) => (
             <Link key={c.id} href={`/cases/${c.id}`} className="block px-5 py-4 hover:bg-[var(--surface-2)]">
               <div className="flex items-center justify-between gap-4">

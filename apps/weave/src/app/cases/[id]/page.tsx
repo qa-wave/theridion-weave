@@ -9,11 +9,12 @@ export const dynamic = "force-dynamic";
 
 export default async function CaseDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const tc = getTestCase(id);
+  const tc = await getTestCase(id);
   if (!tc) notFound();
 
   // results referencing this case across all runs
-  const related = listTestRuns()
+  const runs = await listTestRuns();
+  const related = runs
     .flatMap((r) => r.results.filter((res) => res.testId === tc.id).map((res) => ({ run: r, res })))
     .slice(0, 10);
 

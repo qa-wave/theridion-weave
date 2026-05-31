@@ -1,15 +1,35 @@
 import Link from "next/link";
+import { Plus } from "lucide-react";
 import { coverage, listTestCases, recentRunSummaries, totalsBySource } from "@/data/store";
 import { Card, PageHeader, ResultBadge, SourceBadge, StatTile } from "@/components/ui";
 import { formatPercent, formatRelativeTime } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
-export default function DashboardPage() {
-  const cases = listTestCases();
-  const cov = coverage();
-  const summaries = recentRunSummaries(6);
-  const totals = totalsBySource();
+export default async function DashboardPage() {
+  const [cases, cov, summaries, totals] = await Promise.all([
+    listTestCases(),
+    coverage(),
+    recentRunSummaries(6),
+    totalsBySource(),
+  ]);
+
+  if (cases.length === 0) {
+    return (
+      <>
+        <PageHeader title="Přehled" description="Test management napříč manuálními scénáři a běhy z Eyes a Net." />
+        <Card className="flex flex-col items-center gap-3 py-12 text-center">
+          <p className="text-sm text-[var(--muted)]">Zatím tu nejsou žádné test cases.</p>
+          <Link
+            href="/cases/new"
+            className="flex items-center gap-2 rounded-lg bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white hover:opacity-90"
+          >
+            <Plus size={16} /> Vytvořte první test case
+          </Link>
+        </Card>
+      </>
+    );
+  }
 
   const critical = cases.filter((c) => c.priority === "critical" && c.status === "active").length;
 
@@ -58,6 +78,7 @@ export default function DashboardPage() {
             </Link>
           </div>
           <div className="space-y-2">
+            {summaries.length === 0 && <p className="text-sm text-[var(--muted)]">Zatím žádné běhy.</p>}
             {summaries.map((s) => (
               <div key={s.id} className="flex items-center justify-between rounded-lg bg-[var(--surface-2)] px-3 py-2">
                 <div className="flex items-center gap-2">

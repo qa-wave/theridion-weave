@@ -1,0 +1,35 @@
+name: Weave — post-deploy smoke test
+
+on:
+  deployment_status:
+
+jobs:
+  smoke:
+    if: |
+      github.event.deployment_status.state == 'success' &&
+      contains(github.event.deployment_status.environment_url, 'weave')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Health — GET /api/health → 200 ok
+        run: |
+          set -e
+          url="${{ github.event.deployment_status.environment_url }}"
+          body=$(curl -sf --max-time 15 --retry 3 --retry-delay 5 "$url/api/health")
+          echo "$body"
+          echo "$body" | grep -q '"status":"ok"'
+
+      - name: Ingest smoke — POST /api/runs/ingest
+        env:
+          WEAVE_INGEST_TOKEN: ${{ secrets.WEAVE_INGEST_TOKEN }}
+        run: |
+          url="${{ github.event.deployment_status.environment_url }}"
+          if [ -z "$WEAVE_INGEST_TOKEN" ]; then
+            echo "::warning::WEAVE_INGEST_TOKEN not set — skipping ingest smoke"
+            exit 0
+          fi
+          code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$url/api/runs/ingest" \
+            -H "Authorization: Bearer $WEAVE_INGEST_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"source":"eyes","suiteName":"ci-smoke","triggeredBy":"gh-actions","startedAt":"2026-01-01T00:00:00.000Z","finishedAt":"2026-01-01T00:00:01.000Z","results":[]}')
+          echo "HTTP $code"
+          [ "$code" = "201" ]
