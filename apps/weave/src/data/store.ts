@@ -77,6 +77,32 @@ export async function migrate(): Promise<void> {
     results jsonb not null default '[]'
   )`;
   await q`create index if not exists test_runs_source_started_idx on test_runs (source, started_at desc)`;
+  await q`create table if not exists app_settings (
+    key text primary key,
+    value jsonb not null
+  )`;
+}
+
+// ─── Generic key/value (settings) ─────────────────────────────────────────────
+
+const memKv = ((globalThis as unknown as { __weaveKv?: Map<string, unknown> }).__weaveKv ??=
+  new Map<string, unknown>());
+
+export async function kvGet<T>(key: string): Promise<T | null> {
+  if (USE_DB) {
+    const rows = (await sql()`select value from app_settings where key = ${key}`) as { value: T }[];
+    return rows[0] ? rows[0].value : null;
+  }
+  return (memKv.get(key) as T) ?? null;
+}
+
+export async function kvSet<T>(key: string, value: T): Promise<void> {
+  if (USE_DB) {
+    await sql()`insert into app_settings (key, value) values (${key}, ${JSON.stringify(value)}::jsonb)
+      on conflict (key) do update set value = excluded.value`;
+  } else {
+    memKv.set(key, value);
+  }
 }
 
 /** Insert the demo dataset into Neon (idempotent — skips existing IDs). */
