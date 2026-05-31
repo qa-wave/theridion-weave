@@ -12,6 +12,9 @@ const configSchema = z.object({
   projectKey: z.string().max(50).optional(),
   spaceKey: z.string().max(50).optional(),
   statusTransitionMap: z.string().max(2000).optional(),
+  /** Local module install state */
+  installed: z.boolean().optional(),
+  installPath: z.string().max(1000).optional(),
 });
 
 const patchSchema = z.object({

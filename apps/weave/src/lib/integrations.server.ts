@@ -39,6 +39,9 @@ export async function saveSettings(
       projectKey: p.projectKey ?? current[k].projectKey,
       spaceKey: p.spaceKey ?? current[k].spaceKey,
       statusTransitionMap: p.statusTransitionMap ?? current[k].statusTransitionMap,
+      // Local-module fields: explicit undefined/false is intentional (disconnect)
+      installed: p.installed !== undefined ? p.installed : current[k].installed,
+      installPath: p.installPath !== undefined ? (p.installPath || undefined) : current[k].installPath,
     };
   }
   await kvSet(KEY, current);

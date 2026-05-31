@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check } from "lucide-react";
+import { Check, Download, HardDrive, Unplug } from "lucide-react";
 import type { IntegrationKey, WeaveSettingsView } from "@/lib/integrations";
-import { INTEGRATION_META } from "@/lib/integrations";
+import { INTEGRATION_META, isLocalModule } from "@/lib/integrations";
 
 const STANDARD_KEYS: IntegrationKey[] = ["eyes", "net", "runner"];
 const ATLASSIAN_KEYS: IntegrationKey[] = ["jira", "confluence"];
@@ -20,7 +20,26 @@ interface RowState {
   projectKey?: string;
   spaceKey?: string;
   statusTransitionMap?: string;
+  installed?: boolean;
+  installPath?: string;
 }
+
+/** Wizard step for local module install flow. */
+type WizardStep = "idle" | "ask" | "enter-path" | "download";
+
+interface WizardState {
+  step: WizardStep;
+  pathInput: string;
+  verifying: boolean;
+  verifyError: string | null;
+}
+
+const DEFAULT_WIZARD: WizardState = {
+  step: "idle",
+  pathInput: "",
+  verifying: false,
+  verifyError: null,
+};
 
 /** Format an ISO timestamp as a short relative/absolute label. */
 function formatLastSeen(iso: string | null): { label: string; healthy: boolean } {
@@ -57,6 +76,17 @@ export function SettingsForm({ initial, lastSeen }: Props) {
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  // Per-module install wizard state.
+  const [wizards, setWizards] = useState<Record<string, WizardState>>({});
+
+  function getWizard(k: IntegrationKey): WizardState {
+    return wizards[k] ?? DEFAULT_WIZARD;
+  }
+
+  function patchWizard(k: IntegrationKey, p: Partial<WizardState>) {
+    setWizards((prev) => ({ ...prev, [k]: { ...(prev[k] ?? DEFAULT_WIZARD), ...p } }));
+  }
+
   function patch(k: IntegrationKey, p: Partial<RowState>) {
     setSaved(false);
     setRows((prev) => ({ ...prev, [k]: { ...prev[k], ...p } }));
@@ -73,6 +103,8 @@ export function SettingsForm({ initial, lastSeen }: Props) {
       if (row.projectKey !== undefined) entry.projectKey = row.projectKey;
       if (row.spaceKey !== undefined) entry.spaceKey = row.spaceKey;
       if (row.statusTransitionMap !== undefined) entry.statusTransitionMap = row.statusTransitionMap;
+      if (row.installed !== undefined) entry.installed = row.installed;
+      if (row.installPath !== undefined) entry.installPath = row.installPath;
       payload[k] = entry;
     }
     const res = await fetch("/api/settings", {
@@ -93,6 +125,101 @@ export function SettingsForm({ initial, lastSeen }: Props) {
     }
   }
 
+  /** Verify path with the server and, on success, persist installed state. */
+  async function verifyAndConnect(k: IntegrationKey) {
+    const wizard = getWizard(k);
+    const pathVal = wizard.pathInput.trim();
+    if (!pathVal) {
+      patchWizard(k, { verifyError: "Zadej cestu k modulu." });
+      return;
+    }
+    patchWizard(k, { verifying: true, verifyError: null });
+
+    const res = await fetch("/api/modules/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: k, path: pathVal }),
+    });
+    const body = (await res.json()) as { ok?: boolean; detail?: string; error?: string };
+    patchWizard(k, { verifying: false });
+
+    if (!res.ok || !body.ok) {
+      patchWizard(k, { verifyError: body.detail ?? body.error ?? `Ověření selhalo (HTTP ${res.status})` });
+      return;
+    }
+
+    // Verified — persist via the settings PUT.
+    patch(k, { installed: true, installPath: pathVal });
+    patchWizard(k, { step: "idle", pathInput: "", verifyError: null });
+
+    // Auto-save to persist installation state immediately.
+    setBusy(true);
+    const payload: Record<string, object> = {};
+    for (const key of ALL_KEYS) {
+      const row = { ...rows[key] };
+      if (key === k) {
+        row.installed = true;
+        row.installPath = pathVal;
+      }
+      const entry: Record<string, unknown> = { enabled: row.enabled, baseUrl: row.baseUrl };
+      if (row.token) entry.token = row.token;
+      if (row.email !== undefined) entry.email = row.email;
+      if (row.projectKey !== undefined) entry.projectKey = row.projectKey;
+      if (row.spaceKey !== undefined) entry.spaceKey = row.spaceKey;
+      if (row.statusTransitionMap !== undefined) entry.statusTransitionMap = row.statusTransitionMap;
+      entry.installed = key === k ? true : row.installed;
+      entry.installPath = key === k ? pathVal : row.installPath;
+      payload[key] = entry;
+    }
+    const saveRes = await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    setBusy(false);
+    if (saveRes.ok) {
+      const next = (await saveRes.json()) as WeaveSettingsView;
+      setRows((prev) => {
+        const r = { ...prev };
+        for (const key of ALL_KEYS) r[key] = { ...next[key], token: "" };
+        return r;
+      });
+      router.refresh();
+    }
+  }
+
+  /** Disconnect (clear installed + path), persist. */
+  async function disconnect(k: IntegrationKey) {
+    patch(k, { installed: false, installPath: undefined });
+    patchWizard(k, DEFAULT_WIZARD);
+
+    setBusy(true);
+    const payload: Record<string, object> = {};
+    for (const key of ALL_KEYS) {
+      const row = rows[key];
+      const entry: Record<string, unknown> = { enabled: row.enabled, baseUrl: row.baseUrl };
+      if (row.token) entry.token = row.token;
+      entry.installed = key === k ? false : row.installed;
+      entry.installPath = key === k ? "" : row.installPath;
+      payload[key] = entry;
+    }
+    const saveRes = await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    setBusy(false);
+    if (saveRes.ok) {
+      const next = (await saveRes.json()) as WeaveSettingsView;
+      setRows((prev) => {
+        const r = { ...prev };
+        for (const key of ALL_KEYS) r[key] = { ...next[key], token: "" };
+        return r;
+      });
+      router.refresh();
+    }
+  }
+
   return (
     <div className="space-y-4">
       {ALL_KEYS.map((k) => {
@@ -100,6 +227,9 @@ export function SettingsForm({ initial, lastSeen }: Props) {
         const row = rows[k];
         const ls = formatLastSeen(lastSeen[k] ?? null);
         const isAtlassian = k === "jira" || k === "confluence";
+        const local = isLocalModule(k);
+        const wizard = getWizard(k);
+
         return (
           <div
             key={k}
@@ -118,6 +248,11 @@ export function SettingsForm({ initial, lastSeen }: Props) {
                       <span className="text-xs text-[var(--muted)]">Naposledy: {ls.label}</span>
                     </>
                   )}
+                  {local && row.installed && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-400">
+                      <HardDrive size={10} /> Nainstalováno
+                    </span>
+                  )}
                 </div>
                 <p className="mt-0.5 text-xs text-[var(--muted)]">{meta.hint}</p>
               </div>
@@ -133,6 +268,137 @@ export function SettingsForm({ initial, lastSeen }: Props) {
                 />
               </button>
             </div>
+
+            {/* ── Local module install wizard ── */}
+            {local && (
+              <div className="mt-4">
+                {row.installed ? (
+                  /* Connected state */
+                  <div className="flex items-center gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-2">
+                    <Check size={14} className="shrink-0 text-emerald-400" />
+                    <span className="text-sm text-emerald-300">
+                      Nainstalováno:{" "}
+                      <span className="font-mono text-xs">{row.installPath}</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => disconnect(k)}
+                      disabled={busy}
+                      className="ml-auto inline-flex items-center gap-1 rounded text-xs text-[var(--muted)] hover:text-red-400 disabled:opacity-50"
+                    >
+                      <Unplug size={12} /> Odpojit
+                    </button>
+                  </div>
+                ) : wizard.step === "idle" ? (
+                  /* Trigger button */
+                  <button
+                    type="button"
+                    onClick={() => patchWizard(k, { step: "ask" })}
+                    className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--surface-2)]"
+                  >
+                    Integrovat modul
+                  </button>
+                ) : wizard.step === "ask" ? (
+                  /* Step 1: installed? */
+                  <div className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-4">
+                    <p className="text-sm font-medium">Máš tento modul nainstalovaný?</p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => patchWizard(k, { step: "enter-path" })}
+                        className="rounded-lg bg-[var(--accent)] px-4 py-1.5 text-sm text-white hover:opacity-90"
+                      >
+                        Mám
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => patchWizard(k, { step: "download" })}
+                        className="rounded-lg border border-[var(--border)] px-4 py-1.5 text-sm hover:bg-[var(--surface)]"
+                      >
+                        Nemám
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => patchWizard(k, DEFAULT_WIZARD)}
+                        className="ml-auto text-xs text-[var(--muted)] hover:text-[var(--foreground)]"
+                      >
+                        Zrušit
+                      </button>
+                    </div>
+                  </div>
+                ) : wizard.step === "enter-path" ? (
+                  /* Step 2a: enter path */
+                  <div className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-4">
+                    <p className="text-sm font-medium">Cesta k modulu</p>
+                    <input
+                      className={input}
+                      type="text"
+                      placeholder="/home/user/theridion-eyes"
+                      value={wizard.pathInput}
+                      onChange={(e) => patchWizard(k, { pathInput: e.target.value, verifyError: null })}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void verifyAndConnect(k);
+                      }}
+                    />
+                    {wizard.verifyError && (
+                      <p className="text-xs text-red-400">{wizard.verifyError}</p>
+                    )}
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void verifyAndConnect(k)}
+                        disabled={wizard.verifying}
+                        className="rounded-lg bg-[var(--accent)] px-4 py-1.5 text-sm text-white hover:opacity-90 disabled:opacity-50"
+                      >
+                        {wizard.verifying ? "Ověřuji…" : "Ověřit a připojit"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => patchWizard(k, { step: "ask", verifyError: null })}
+                        className="rounded-lg border border-[var(--border)] px-4 py-1.5 text-sm hover:bg-[var(--surface)]"
+                      >
+                        Zpět
+                      </button>
+                    </div>
+                  </div>
+                ) : wizard.step === "download" ? (
+                  /* Step 2b: download panel */
+                  <div className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-4">
+                    <p className="text-sm font-medium">Stáhni a nainstaluj modul</p>
+                    {meta.downloadUrl && (
+                      <a
+                        href={meta.downloadUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 rounded-lg bg-[var(--accent)] px-4 py-1.5 text-sm text-white hover:opacity-90"
+                      >
+                        <Download size={14} /> Stáhnout
+                      </a>
+                    )}
+                    {meta.installHint && (
+                      <p className="text-xs text-[var(--muted)]">{meta.installHint}</p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => patchWizard(k, { step: "enter-path", verifyError: null })}
+                      className="text-xs text-[var(--accent)] underline-offset-2 hover:underline"
+                    >
+                      Už mám — zadat cestu
+                    </button>
+                    <div className="pt-1">
+                      <button
+                        type="button"
+                        onClick={() => patchWizard(k, DEFAULT_WIZARD)}
+                        className="text-xs text-[var(--muted)] hover:text-[var(--foreground)]"
+                      >
+                        Zrušit
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            )}
+
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <div>
                 <label className="mb-1 block text-xs font-medium text-[var(--muted)]">Base URL</label>

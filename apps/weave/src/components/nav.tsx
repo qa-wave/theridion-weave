@@ -2,12 +2,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, ListChecks, FolderKanban, PlayCircle, Settings, BookText, Code2, Link2 } from "lucide-react";
+import { LayoutDashboard, ListChecks, FolderKanban, PlayCircle, Settings, BookText, Code2, Link2, Puzzle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { IntegrationKey } from "@/lib/integrations";
 
-const items = [
+const BASE_ITEMS_BEFORE_CASES = [
   { href: "/", label: "Přehled", icon: LayoutDashboard },
   { href: "/cases", label: "Test cases", icon: ListChecks },
+];
+
+const BASE_ITEMS_AFTER_CASES = [
   { href: "/scripts", label: "Skripty", icon: Code2 },
   { href: "/plans", label: "Plány", icon: FolderKanban },
   { href: "/runs", label: "Běhy", icon: PlayCircle },
@@ -16,8 +20,26 @@ const items = [
   { href: "/settings", label: "Nastavení", icon: Settings },
 ];
 
-export function Nav() {
+interface NavProps {
+  /** Installed local modules to show as extra tabs right after "Test cases". */
+  installedModules?: Array<{ key: IntegrationKey; label: string }>;
+}
+
+export function Nav({ installedModules = [] }: NavProps) {
   const pathname = usePathname();
+
+  const moduleItems = installedModules.map(({ key, label }) => ({
+    href: `/modules/${key}`,
+    label,
+    icon: Puzzle,
+  }));
+
+  const allItems = [
+    ...BASE_ITEMS_BEFORE_CASES,
+    ...moduleItems,
+    ...BASE_ITEMS_AFTER_CASES,
+  ];
+
   return (
     <aside className="flex w-56 shrink-0 flex-col border-r border-[var(--border)] bg-[var(--surface)] p-4">
       <Link href="/" className="mb-8 flex items-center gap-2 px-2">
@@ -30,7 +52,7 @@ export function Nav() {
         </div>
       </Link>
       <nav className="flex flex-col gap-1">
-        {items.map(({ href, label, icon: Icon }) => {
+        {allItems.map(({ href, label, icon: Icon }) => {
           const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
           return (
             <Link
