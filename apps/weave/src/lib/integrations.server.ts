@@ -42,6 +42,9 @@ export async function saveSettings(
       // Local-module fields: explicit undefined/false is intentional (disconnect)
       installed: p.installed !== undefined ? p.installed : current[k].installed,
       installPath: p.installPath !== undefined ? (p.installPath || undefined) : current[k].installPath,
+      // Connection-type fields (optional; clearing with "" resets to undefined)
+      connectionType: p.connectionType !== undefined ? (p.connectionType || undefined) : current[k].connectionType,
+      dataDir: p.dataDir !== undefined ? (p.dataDir || undefined) : current[k].dataDir,
     };
   }
   await kvSet(KEY, current);

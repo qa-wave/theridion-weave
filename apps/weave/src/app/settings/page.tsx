@@ -1,3 +1,4 @@
+import { headers } from "next/headers";
 import { PageHeader } from "@/components/ui";
 import { maskSettings } from "@/lib/integrations";
 import type { IntegrationKey } from "@/lib/integrations";
@@ -8,11 +9,12 @@ import { SettingsForm } from "./settings-form";
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  const [settings, eyesLastSeen, netLastSeen, runnerLastSeen] = await Promise.all([
+  const [settings, eyesLastSeen, netLastSeen, runnerLastSeen, hdrs] = await Promise.all([
     loadSettings(),
     getLastSeen("eyes"),
     getLastSeen("net"),
     getLastSeen("runner"),
+    headers(),
   ]);
   const lastSeen: Record<IntegrationKey, string | null> = {
     eyes: eyesLastSeen,
@@ -22,13 +24,19 @@ export default async function SettingsPage() {
     jira: null,
     confluence: null,
   };
+
+  // Derive origin for the ingest endpoint hint shown in the 'app' wizard step.
+  const host = hdrs.get("host") ?? "localhost:3000";
+  const proto = hdrs.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
+  const origin = `${proto}://${host}`;
+
   return (
     <>
       <PageHeader
         title="Nastavení · Integrace"
         description="Zapni napojení na ostatní Theridion nástroje. Po zapnutí Weave přijímá/páruje jejich výsledky."
       />
-      <SettingsForm initial={maskSettings(settings)} lastSeen={lastSeen} />
+      <SettingsForm initial={maskSettings(settings)} lastSeen={lastSeen} origin={origin} />
     </>
   );
 }

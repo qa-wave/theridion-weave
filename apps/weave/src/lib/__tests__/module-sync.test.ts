@@ -1,8 +1,9 @@
 /**
- * Unit tests for the sync spec-scan / upsert logic.
+ * Unit tests for the sync spec-scan / upsert logic and connection-type routing.
  *
  * We extract the pure walkFiles helper and the upsert logic, mock the store,
- * and verify idempotency and correct file pattern matching.
+ * and verify idempotency, correct file pattern matching, and per-connection-type
+ * behaviour.
  */
 
 import { describe, expect, it, jest, beforeEach } from "@jest/globals";
@@ -207,5 +208,153 @@ describe("sync upsert idempotency", () => {
 
   it("handles empty specPaths", () => {
     expect(simulateUpsert([], ["a.spec.ts"])).toBe(0);
+  });
+});
+
+// ─── Connection-type routing logic ────────────────────────────────────────────
+
+describe("sync connectionType routing", () => {
+  /**
+   * Simulate the guard logic in the sync route: which config fields are
+   * required per connection type.
+   */
+  type ConnCfg = {
+    connectionType?: "app" | "service" | "source";
+    installed?: boolean;
+    installPath?: string;
+    enabled?: boolean;
+    baseUrl?: string;
+    dataDir?: string;
+  };
+
+  function guardCheck(cfg: ConnCfg): { allowed: boolean; reason?: string } {
+    const ct = cfg.connectionType;
+    if (ct === "source" && (!cfg.installed || !cfg.installPath)) {
+      return { allowed: false, reason: "source: installPath required" };
+    }
+    if (ct === "service" && (!cfg.enabled || !cfg.baseUrl)) {
+      return { allowed: false, reason: "service: baseUrl required" };
+    }
+    if (!ct && !cfg.installed) {
+      return { allowed: false, reason: "legacy: not installed" };
+    }
+    return { allowed: true };
+  }
+
+  it("blocks source sync when installPath is missing", () => {
+    const r = guardCheck({ connectionType: "source", installed: true });
+    expect(r.allowed).toBe(false);
+    expect(r.reason).toContain("installPath");
+  });
+
+  it("blocks source sync when not installed", () => {
+    const r = guardCheck({ connectionType: "source", installed: false, installPath: "/path" });
+    expect(r.allowed).toBe(false);
+  });
+
+  it("allows source sync when installed=true and installPath is set", () => {
+    const r = guardCheck({ connectionType: "source", installed: true, installPath: "/path" });
+    expect(r.allowed).toBe(true);
+  });
+
+  it("blocks service sync when baseUrl is missing", () => {
+    const r = guardCheck({ connectionType: "service", enabled: true });
+    expect(r.allowed).toBe(false);
+    expect(r.reason).toContain("baseUrl");
+  });
+
+  it("blocks service sync when not enabled", () => {
+    const r = guardCheck({ connectionType: "service", enabled: false, baseUrl: "http://x.com" });
+    expect(r.allowed).toBe(false);
+  });
+
+  it("allows service sync when enabled=true and baseUrl is set", () => {
+    const r = guardCheck({ connectionType: "service", enabled: true, baseUrl: "http://svc" });
+    expect(r.allowed).toBe(true);
+  });
+
+  it("allows app sync when installed=true (no installPath required)", () => {
+    const r = guardCheck({ connectionType: "app", installed: true });
+    expect(r.allowed).toBe(true);
+  });
+
+  it("allows app sync regardless of baseUrl (push-based)", () => {
+    const r = guardCheck({ connectionType: "app", installed: true, baseUrl: undefined });
+    expect(r.allowed).toBe(true);
+  });
+
+  it("blocks legacy (no connectionType) when not installed", () => {
+    const r = guardCheck({ installed: false });
+    expect(r.allowed).toBe(false);
+  });
+
+  it("allows legacy (no connectionType) when installed=true", () => {
+    const r = guardCheck({ installed: true, installPath: "/some/path" });
+    expect(r.allowed).toBe(true);
+  });
+});
+
+// ─── installedModules semantics per connectionType ────────────────────────────
+
+describe("installedModules connection-type semantics", () => {
+  // Mirror the logic from integrations.ts installedModules()
+  type ViewEntry = {
+    installed?: boolean;
+    installPath?: string;
+    enabled?: boolean;
+    baseUrl?: string;
+    connectionType?: "app" | "service" | "source";
+  };
+
+  function isConnected(v: ViewEntry): boolean {
+    const ct = v.connectionType;
+    if (ct === "app") return v.installed === true;
+    if (ct === "service") return v.enabled === true && !!v.baseUrl;
+    if (ct === "source") return v.installed === true && !!v.installPath;
+    return v.installed === true; // legacy fallback
+  }
+
+  it("app type: connected when installed=true", () => {
+    expect(isConnected({ connectionType: "app", installed: true })).toBe(true);
+  });
+
+  it("app type: not connected when installed=false", () => {
+    expect(isConnected({ connectionType: "app", installed: false })).toBe(false);
+  });
+
+  it("app type: does not require baseUrl to be connected", () => {
+    expect(isConnected({ connectionType: "app", installed: true, baseUrl: undefined })).toBe(true);
+  });
+
+  it("service type: connected when enabled=true and baseUrl set", () => {
+    expect(isConnected({ connectionType: "service", enabled: true, baseUrl: "http://x" })).toBe(true);
+  });
+
+  it("service type: not connected when enabled=false", () => {
+    expect(isConnected({ connectionType: "service", enabled: false, baseUrl: "http://x" })).toBe(false);
+  });
+
+  it("service type: not connected when baseUrl is empty", () => {
+    expect(isConnected({ connectionType: "service", enabled: true, baseUrl: "" })).toBe(false);
+  });
+
+  it("source type: connected when installed=true and installPath set", () => {
+    expect(isConnected({ connectionType: "source", installed: true, installPath: "/path" })).toBe(true);
+  });
+
+  it("source type: not connected when installPath is missing", () => {
+    expect(isConnected({ connectionType: "source", installed: true, installPath: undefined })).toBe(false);
+  });
+
+  it("source type: not connected when installed=false", () => {
+    expect(isConnected({ connectionType: "source", installed: false, installPath: "/path" })).toBe(false);
+  });
+
+  it("legacy (no connectionType): connected when installed=true", () => {
+    expect(isConnected({ installed: true })).toBe(true);
+  });
+
+  it("legacy (no connectionType): not connected when installed=false", () => {
+    expect(isConnected({ installed: false })).toBe(false);
   });
 });

@@ -1,12 +1,18 @@
 // POST /api/modules/[key]/sync — real best-effort synchronisation for an
-// installed local module. Scans installPath for spec/collection files and
-// upserts them as TestScript entities (idempotent by specPath). Also attempts
-// to pull recent run results if the module exposes a compatible /runs endpoint.
+// installed local module. Behaviour depends on connectionType:
+//
+//   'source'  → scan installPath for spec/collection files and upsert as
+//               TestScript entities (existing behaviour).
+//   'app'     → if dataDir given, scan it for exported specs; otherwise skip
+//               spec scan. Reports count of runs already ingested via push.
+//   'service' → pull recent runs from baseUrl /api/runs (existing best-effort).
+//
+// Always idempotent. Returns { scriptsSynced, runsSynced, note }.
 import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 import { loadSettings } from "@/lib/integrations.server";
-import { listTestScripts, createTestScript } from "@/data/store";
+import { listTestScripts, createTestScript, listTestRuns } from "@/data/store";
 import { logger } from "@/lib/logger";
 import type { IntegrationKey } from "@/lib/integrations";
 import { isLocalModule } from "@/lib/integrations";
@@ -65,6 +71,37 @@ function productFor(key: LocalModuleKey): "eyes" | "net" {
   return key === "eyes" ? "eyes" : "net";
 }
 
+/** Upsert spec files as TestScript entities; returns count of newly created. */
+async function syncSpecs(
+  scanRoot: string,
+  moduleKey: LocalModuleKey,
+): Promise<number> {
+  const pattern = SPEC_PATTERNS[moduleKey];
+  if (!pattern) return 0;
+
+  const specPaths = walkFiles(scanRoot, pattern);
+  const existingScripts = await listTestScripts({ product: productFor(moduleKey) });
+  const bySpecPath = new Map(
+    existingScripts.filter((s) => s.specPath).map((s) => [s.specPath!, s.id]),
+  );
+
+  let synced = 0;
+  for (const specPath of specPaths) {
+    if (!bySpecPath.has(specPath)) {
+      await createTestScript({
+        name: path.basename(specPath),
+        product: productFor(moduleKey),
+        framework: frameworkFor(moduleKey),
+        specPath,
+        status: "draft",
+        owner: "sync",
+      });
+      synced++;
+    }
+  }
+  return synced;
+}
+
 export async function POST(
   _req: Request,
   context: { params: Promise<{ key: string }> },
@@ -80,7 +117,7 @@ export async function POST(
 
   const moduleKey = key as LocalModuleKey;
 
-  // Load settings and verify the module is installed + enabled.
+  // Load settings and verify the module is installed or active.
   let settings;
   try {
     settings = await loadSettings();
@@ -90,93 +127,158 @@ export async function POST(
   }
 
   const cfg = settings[moduleKey as IntegrationKey];
-  if (!cfg.installed || !cfg.installPath) {
+  const ct = cfg.connectionType;
+
+  // For 'source' we need installPath; for 'app' we need installed=true; for 'service' we need baseUrl.
+  if (ct === "source" && (!cfg.installed || !cfg.installPath)) {
+    return NextResponse.json(
+      { error: "Modul není nainstalován nebo nemá nastavenou cestu." },
+      { status: 409 },
+    );
+  }
+  if (ct === "service" && (!cfg.enabled || !cfg.baseUrl)) {
+    return NextResponse.json(
+      { error: "Služba není povolena nebo nemá nastavenou Base URL." },
+      { status: 409 },
+    );
+  }
+  if (!ct && !cfg.installed) {
+    // Legacy fallback: same guard as before.
     return NextResponse.json(
       { error: "Modul není nainstalován nebo nemá nastavenou cestu." },
       { status: 409 },
     );
   }
 
-  const installPath = cfg.installPath;
   let scriptsSynced = 0;
   let runsSynced = 0;
+  let note: string | undefined;
 
-  // ── 1. Scan spec files and upsert as TestScript entities ──────────────────
+  // ── Branch on connectionType ────────────────────────────────────────────────
 
-  const pattern = SPEC_PATTERNS[moduleKey];
-  if (pattern) {
-    const specPaths = walkFiles(installPath, pattern);
-    const existingScripts = await listTestScripts({ product: productFor(moduleKey) });
-    const bySpecPath = new Map(
-      existingScripts.filter((s) => s.specPath).map((s) => [s.specPath!, s.id]),
-    );
+  if (ct === "source" || (!ct && cfg.installPath)) {
+    // ── Source type: scan installPath ──────────────────────────────────────
+    const installPath = cfg.installPath!;
+    scriptsSynced = await syncSpecs(installPath, moduleKey);
+    note = `Skenováno: ${installPath}`;
 
-    for (const specPath of specPaths) {
-      const existingId = bySpecPath.get(specPath);
-      if (existingId) {
-        // Already tracked — no-op (status is managed by the user / CI pipeline).
-      } else {
-        await createTestScript({
-          name: path.basename(specPath),
-          product: productFor(moduleKey),
-          framework: frameworkFor(moduleKey),
-          specPath,
-          status: "draft",
-          owner: "sync",
+    // Best-effort: pull recent runs from the module's HTTP API (if URL set).
+    if (cfg.enabled && cfg.baseUrl) {
+      try {
+        const runsUrl = `${cfg.baseUrl.replace(/\/$/, "")}/api/runs?limit=20`;
+        const resp = await fetch(runsUrl, {
+          headers: cfg.token ? { Authorization: `Bearer ${cfg.token}` } : {},
+          signal: AbortSignal.timeout(5_000),
         });
-        scriptsSynced++;
-      }
-    }
-  }
-
-  // ── 2. Best-effort: pull recent runs from the module's HTTP API ───────────
-
-  if (cfg.enabled && cfg.baseUrl) {
-    try {
-      const runsUrl = `${cfg.baseUrl.replace(/\/$/, "")}/api/runs?limit=20`;
-      const resp = await fetch(runsUrl, {
-        headers: cfg.token ? { Authorization: `Bearer ${cfg.token}` } : {},
-        signal: AbortSignal.timeout(5_000),
-      });
-      if (resp.ok) {
-        // The module is expected to return an array of RunnerIngestPayload-
-        // compatible objects. We import each one that isn't already in Weave.
-        type RemoteRun = {
-          id?: string;
-          source?: string;
-          suiteName?: string;
-          label?: string;
-          triggeredBy?: string;
-          startedAt?: string;
-          finishedAt?: string;
-          results?: unknown[];
-        };
-        const remoteRuns = (await resp.json()) as RemoteRun[];
-        if (Array.isArray(remoteRuns)) {
-          const { saveIngestedRun } = await import("@/data/store");
-          const { randomUUID } = await import("node:crypto");
-          for (const r of remoteRuns) {
-            const run = {
-              id: r.id ?? `run-${randomUUID().slice(0, 8)}`,
-              source: (r.source ?? moduleKey) as RunSource,
-              suiteName: r.suiteName,
-              label: r.label,
-              triggeredBy: r.triggeredBy ?? "sync",
-              startedAt: r.startedAt ?? new Date().toISOString(),
-              finishedAt: r.finishedAt ?? null,
-              results: Array.isArray(r.results) ? (r.results as import("@/lib/types").TestResult[]) : [],
-              runStatus: "completed" as import("@/lib/types").RunWorkflowStatus,
-              statusHistory: [],
-            };
-            const { created } = await saveIngestedRun(run);
-            if (created) runsSynced++;
+        if (resp.ok) {
+          type RemoteRun = {
+            id?: string;
+            source?: string;
+            suiteName?: string;
+            label?: string;
+            triggeredBy?: string;
+            startedAt?: string;
+            finishedAt?: string;
+            results?: unknown[];
+          };
+          const remoteRuns = (await resp.json()) as RemoteRun[];
+          if (Array.isArray(remoteRuns)) {
+            const { saveIngestedRun } = await import("@/data/store");
+            const { randomUUID } = await import("node:crypto");
+            for (const r of remoteRuns) {
+              const run = {
+                id: r.id ?? `run-${randomUUID().slice(0, 8)}`,
+                source: (r.source ?? moduleKey) as RunSource,
+                suiteName: r.suiteName,
+                label: r.label,
+                triggeredBy: r.triggeredBy ?? "sync",
+                startedAt: r.startedAt ?? new Date().toISOString(),
+                finishedAt: r.finishedAt ?? null,
+                results: Array.isArray(r.results) ? (r.results as import("@/lib/types").TestResult[]) : [],
+                runStatus: "completed" as import("@/lib/types").RunWorkflowStatus,
+                statusHistory: [],
+              };
+              const { created } = await saveIngestedRun(run);
+              if (created) runsSynced++;
+            }
           }
         }
+      } catch {
+        // Best-effort — network failures are silently ignored.
       }
+    }
+  } else if (ct === "app") {
+    // ── App type: push-based. Optionally scan dataDir for exported specs ──
+    if (cfg.dataDir) {
+      try {
+        scriptsSynced = await syncSpecs(cfg.dataDir, moduleKey);
+        note = `Skenováno: ${cfg.dataDir}`;
+      } catch {
+        note = "Sken datové složky selhal.";
+      }
+    } else {
+      note = "Aplikace je nakonfigurována jako push-only — výsledky přicházejí přes /api/runs/ingest.";
+    }
+
+    // Count runs already ingested via push for this source.
+    try {
+      const existingRuns = await listTestRuns(moduleKey as RunSource);
+      runsSynced = existingRuns.length;
+      note = (note ? note + " " : "") + `Celkem ingested běhů: ${runsSynced}.`;
     } catch {
-      // Best-effort — network failures are silently ignored.
+      // Best-effort.
+    }
+    // runsSynced here reflects existing runs, not newly created — clarify in note.
+    // Reset to 0 so callers see "0 new runs pulled" (consistent with pull semantics).
+    runsSynced = 0;
+  } else if (ct === "service") {
+    // ── Service type: pull via baseUrl ────────────────────────────────────
+    if (cfg.enabled && cfg.baseUrl) {
+      try {
+        const runsUrl = `${cfg.baseUrl.replace(/\/$/, "")}/api/runs?limit=20`;
+        const resp = await fetch(runsUrl, {
+          headers: cfg.token ? { Authorization: `Bearer ${cfg.token}` } : {},
+          signal: AbortSignal.timeout(5_000),
+        });
+        if (resp.ok) {
+          type RemoteRun = {
+            id?: string;
+            source?: string;
+            suiteName?: string;
+            label?: string;
+            triggeredBy?: string;
+            startedAt?: string;
+            finishedAt?: string;
+            results?: unknown[];
+          };
+          const remoteRuns = (await resp.json()) as RemoteRun[];
+          if (Array.isArray(remoteRuns)) {
+            const { saveIngestedRun } = await import("@/data/store");
+            const { randomUUID } = await import("node:crypto");
+            for (const r of remoteRuns) {
+              const run = {
+                id: r.id ?? `run-${randomUUID().slice(0, 8)}`,
+                source: (r.source ?? moduleKey) as RunSource,
+                suiteName: r.suiteName,
+                label: r.label,
+                triggeredBy: r.triggeredBy ?? "sync",
+                startedAt: r.startedAt ?? new Date().toISOString(),
+                finishedAt: r.finishedAt ?? null,
+                results: Array.isArray(r.results) ? (r.results as import("@/lib/types").TestResult[]) : [],
+                runStatus: "completed" as import("@/lib/types").RunWorkflowStatus,
+                statusHistory: [],
+              };
+              const { created } = await saveIngestedRun(run);
+              if (created) runsSynced++;
+            }
+          }
+        }
+        note = `Synchronizováno ze služby: ${cfg.baseUrl}`;
+      } catch {
+        note = "Synchronizace ze služby selhala (síťová chyba).";
+      }
     }
   }
 
-  return NextResponse.json({ scriptsSynced, runsSynced });
+  return NextResponse.json({ scriptsSynced, runsSynced, note });
 }
