@@ -7,6 +7,7 @@
 
 import { randomUUID } from "node:crypto";
 import { neon } from "@neondatabase/serverless";
+import { defaultSettings } from "@/lib/integrations";
 import type {
   CoverageSummary,
   Requirement,
@@ -170,10 +171,10 @@ export async function seedDatabase(): Promise<{ cases: number; plans: number; ru
   }
   for (const r of data.runs) {
     await q`insert into test_runs
-      (id, plan_id, source, suite_name, label, triggered_by, started_at, finished_at, results, run_status, status_history)
+      (id, plan_id, source, suite_name, label, triggered_by, started_at, finished_at, results, run_status, jira_key, status_history)
       values (${r.id}, ${r.planId ?? null}, ${r.source}, ${r.suiteName ?? null}, ${r.label ?? null},
               ${r.triggeredBy}, ${r.startedAt}, ${r.finishedAt}, ${JSON.stringify(r.results)},
-              ${r.runStatus}, ${JSON.stringify(r.statusHistory)})
+              ${r.runStatus}, ${r.jiraKey ?? null}, ${JSON.stringify(r.statusHistory)})
       on conflict (id) do nothing`;
   }
   for (const req of data.requirements) {
@@ -304,6 +305,7 @@ function seed(): Store {
       tags: ["auth", "smoke"],
       status: "active",
       caseKey: "auth › login happy path",
+      jiraKey: "CEPS-101",
       type: "manual",
       owner: "qa@qawave.ai",
       createdAt: at(40),
@@ -327,6 +329,7 @@ function seed(): Store {
       tags: ["auth", "negative"],
       status: "active",
       caseKey: "auth › invalid creds",
+      jiraKey: "CEPS-102",
       type: "manual",
       owner: "qa@qawave.ai",
       createdAt: at(38),
@@ -394,6 +397,7 @@ function seed(): Store {
       tags: ["checkout", "regression"],
       status: "active",
       caseKey: "checkout › apply coupon SAVE10",
+      jiraKey: "CEPS-201",
       type: "manual",
       owner: "po@qawave.ai",
       createdAt: at(30),
@@ -705,6 +709,7 @@ function seed(): Store {
       finishedAt: at(21, 52 * 60_000),
       triggeredBy: "qa@qawave.ai",
       label: "release-2.3.0",
+      jiraKey: "CEPS-601",
       runStatus: "signed_off",
       statusHistory: [
         { from: "created", to: "in_progress", by: "qa@qawave.ai", at: at(21, 0) },
@@ -726,6 +731,7 @@ function seed(): Store {
       finishedAt: at(14, 95 * 60_000),
       triggeredBy: "qa@qawave.ai",
       label: "release-2.3.5",
+      jiraKey: "CEPS-602",
       runStatus: "signed_off",
       statusHistory: [
         { from: "created", to: "in_progress", by: "qa@qawave.ai", at: at(14, 0) },
@@ -783,13 +789,13 @@ function seed(): Store {
       id: "run-manual-5",
       planId: "tp-sprint-48",
       source: "manual",
-      startedAt: at(2, 0),
-      finishedAt: at(2, 55 * 60_000),
+      startedAt: at(0, 30 * 60_000),
+      finishedAt: null,
       triggeredBy: "qa@qawave.ai",
       label: "sprint-48-demo",
       runStatus: "in_progress",
       statusHistory: [
-        { from: "created", to: "in_progress", by: "qa@qawave.ai", at: at(2, 0) },
+        { from: "created", to: "in_progress", by: "qa@qawave.ai", at: at(0, 30 * 60_000) },
       ],
       results: [
         { testId: "tc-email-welcome", title: "Welcome email after registration", status: "pass", durationMs: 145_000 },
@@ -1136,6 +1142,7 @@ function seed(): Store {
       framework: "Playwright",
       specPath: "playwright/auth.spec.ts",
       caseKey: "auth › login happy path",
+      jiraKey: "CEPS-501",
       status: "active",
       owner: "qa@qawave.ai",
       statusHistory: [
@@ -1167,6 +1174,7 @@ function seed(): Store {
       framework: "Playwright",
       specPath: "playwright/checkout.spec.ts",
       caseKey: "checkout › apply coupon SAVE10",
+      jiraKey: "CEPS-502",
       status: "active",
       owner: "po@qawave.ai",
       statusHistory: [
@@ -1250,7 +1258,7 @@ function seed(): Store {
   return { cases, plans, runs, requirements, scripts };
 }
 
-const g = globalThis as unknown as { __weaveStore?: Store };
+const g = globalThis as unknown as { __weaveStore?: Store; __weaveKvSeeded?: boolean };
 function ensureStore(s: Store): Store {
   if (!s.requirements) s.requirements = [];
   if (!s.scripts) s.scripts = [];
@@ -1265,6 +1273,42 @@ function ensureStore(s: Store): Store {
   return s;
 }
 const mem: Store = ensureStore(g.__weaveStore ?? (g.__weaveStore = seed()));
+
+// ─── Demo-mode settings seed ─────────────────────────────────────────────────
+// In demo mode (no DATABASE_URL) pre-populate the kv store so the Eyes module
+// page (/modules/eyes) resolves to a connected, data-populated view instead of
+// 404ing because no settings have been persisted yet.
+if (!USE_DB && !g.__weaveKvSeeded) {
+  g.__weaveKvSeeded = true;
+  const demoSettings = defaultSettings();
+  // Mark Eyes as installed as an 'app' type so /modules/eyes resolves
+  demoSettings.eyes = {
+    ...demoSettings.eyes,
+    enabled: true,
+    installed: true,
+    connectionType: "app",
+    token: "demo-token",
+  };
+  // Mark Net as installed as well so /modules/net also has data
+  demoSettings.net = {
+    ...demoSettings.net,
+    enabled: true,
+    installed: true,
+    connectionType: "app",
+    token: "demo-token",
+  };
+  // Pre-populate — don't overwrite if already set (idempotent)
+  if (!memKv.has("integrations")) {
+    memKv.set("integrations", demoSettings);
+  }
+  // Seed lastSeen for eyes and net so the module page shows "last received" instead of "waiting"
+  if (!memKv.has("lastSeen:eyes")) {
+    memKv.set("lastSeen:eyes", at(1));
+  }
+  if (!memKv.has("lastSeen:net")) {
+    memKv.set("lastSeen:net", at(1));
+  }
+}
 
 /** Exported for the seed script — returns the canonical demo dataset. */
 export function seedData(): Store {
