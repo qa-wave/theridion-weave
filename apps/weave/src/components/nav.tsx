@@ -46,9 +46,7 @@ export function Nav({ installedModules = [] }: NavProps) {
   return (
     <aside className="flex w-56 shrink-0 flex-col border-r border-[var(--border)] bg-[var(--surface)] p-4">
       <Link href="/" className="mb-8 flex items-center gap-2 px-2">
-        <span className="grid h-8 w-8 place-items-center rounded-lg bg-[var(--accent)] text-sm font-bold text-white">
-          W
-        </span>
+        <img src="/favicon.svg" alt="Weave mark" width={32} height={32} className="rounded-lg" />
         <div className="leading-tight">
           <div className="text-sm font-semibold">Theridion</div>
           <div className="text-xs text-[var(--accent)]">Weave</div>

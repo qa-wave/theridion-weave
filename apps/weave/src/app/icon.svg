@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#a78bfa"/><stop offset="1" stop-color="#7c3aed"/></linearGradient></defs>
+<rect width="64" height="64" rx="14" fill="#0b0a10"/>
+  <g fill="none" stroke="url(#g)" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke-width="2" opacity="0.30">
+      <path d="M32 32 L32 8"/><path d="M32 32 L52.8 20"/><path d="M32 32 L52.8 44"/>
+      <path d="M32 32 L32 56"/><path d="M32 32 L11.2 44"/><path d="M32 32 L11.2 20"/>
+    </g>
+    <path stroke-width="2" opacity="0.32" d="M32 8 L52.8 20 L52.8 44 L32 56 L11.2 44 L11.2 20 Z"/>
+    <path stroke-width="2" opacity="0.55" d="M32 18 L42.2 24 L42.2 40 L32 46 L21.8 40 L21.8 24 Z"/>
+  </g>
+  <g fill="none" stroke="url(#g)" stroke-width="3" stroke-linecap="round">
+    <!-- horizontal strand: over at left, under at right (gap) -->
+    <path d="M21 27 C27 27, 27 37, 33 37"/>
+    <path d="M37 27 C42 27, 43 37, 43 37"/>
+    <!-- horizontal strand 2 -->
+    <path d="M21 37 C27 37, 27 27, 31 27"/>
+    <path d="M35 37 C41 37, 43 27, 43 27"/>
+  </g>
+  <circle cx="32" cy="32" r="2.4" fill="#c4b5fd"/>
+</svg>
