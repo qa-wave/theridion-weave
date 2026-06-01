@@ -5,6 +5,7 @@ import { getTestRun, getTestCase, getTestPlan } from "@/data/store";
 import { Card, PageHeader, ResultBadge } from "@/components/ui";
 import { ExecuteRunForm } from "./execute-run-form";
 import type { TestCase } from "@/lib/types";
+import { getServerT } from "@/lib/i18n/server";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,7 @@ interface Props {
 }
 
 export default async function ExecuteRunPage({ params }: Props) {
+  const t = await getServerT();
   const { id } = await params;
   const run = await getTestRun(id);
   if (!run) notFound();
@@ -36,22 +38,22 @@ export default async function ExecuteRunPage({ params }: Props) {
         href="/runs"
         className="mb-4 inline-flex items-center gap-1 text-sm text-[var(--muted)] hover:text-[var(--foreground)]"
       >
-        <ArrowLeft size={14} /> Běhy
+        <ArrowLeft size={14} /> {t("executeRun.backLink")}
       </Link>
       <PageHeader
-        title={plan ? `Provádění: ${plan.name}` : "Provádění běhu"}
+        title={plan ? `${t("executeRun.title.prefix")}${plan.name}` : t("executeRun.title.default")}
         description={
           done
-            ? "Běh je dokončen."
-            : `${run.results.filter((r) => r.status !== "skip").length} / ${run.results.length} cases ohodnoceno`
+            ? t("executeRun.done.description")
+            : `${run.results.filter((r) => r.status !== "skip").length} / ${run.results.length} ${t("executeRun.active.description")}`
         }
       />
 
       {done && (
         <div className="mb-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
-          Běh dokončen. Všechny cases byly ohodnoceny.{" "}
+          {t("executeRun.done.banner")}{" "}
           <Link href="/runs" className="underline">
-            Zpět na přehled
+            {t("executeRun.done.backLink")}
           </Link>
         </div>
       )}
@@ -90,7 +92,7 @@ export default async function ExecuteRunPage({ params }: Props) {
 
             {tc?.expectedResult && (
               <p className="mb-4 text-xs text-[var(--muted)]">
-                <span className="font-medium">Očekávaný výsledek:</span> {tc.expectedResult}
+                <span className="font-medium">{t("executeRun.expectedResult.label")}</span> {tc.expectedResult}
               </p>
             )}
 

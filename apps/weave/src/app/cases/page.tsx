@@ -3,6 +3,7 @@ import { Plus } from "lucide-react";
 import { allTags, listTestCases } from "@/data/store";
 import { Card, CaseStatusBadge, PageHeader, PriorityBadge, Tag } from "@/components/ui";
 import { formatRelativeTime } from "@/lib/utils";
+import { getServerT } from "@/lib/i18n/server";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,7 @@ interface SearchParams {
 }
 
 export default async function CasesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const t = await getServerT();
   const sp = await searchParams;
   const cases = await listTestCases(sp);
   const tags = await allTags();
@@ -21,14 +23,14 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
   return (
     <>
       <PageHeader
-        title="Test cases"
-        description="Manuální testovací scénáře. Filtruj podle tagu, priority a stavu."
+        title={t("cases.title")}
+        description={t("cases.description")}
         action={
           <Link
             href="/cases/new"
             className="flex items-center gap-2 rounded-lg bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white hover:opacity-90"
           >
-            <Plus size={16} /> Nový case
+            <Plus size={16} /> {t("cases.new")}
           </Link>
         }
       />
@@ -38,12 +40,12 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
         <FilterLink param="status" value="draft" current={sp.status} label="draft" />
         <FilterLink param="priority" value="critical" current={sp.priority} label="critical" />
         <FilterLink param="priority" value="high" current={sp.priority} label="high" />
-        {tags.map((t) => (
-          <FilterLink key={t} param="tag" value={t} current={sp.tag} label={`#${t}`} />
+        {tags.map((tag) => (
+          <FilterLink key={tag} param="tag" value={tag} current={sp.tag} label={`#${tag}`} />
         ))}
         {(sp.tag || sp.priority || sp.status) && (
           <Link href="/cases" className="text-[var(--accent)] hover:underline">
-            × zrušit filtry
+            {t("cases.filter.cancelFilters")}
           </Link>
         )}
       </div>
@@ -53,12 +55,12 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
           {cases.length === 0 && (
             <div className="flex flex-col items-center gap-3 p-10 text-center text-sm text-[var(--muted)]">
               {hasFilter ? (
-                <>Žádné test cases neodpovídají filtru.</>
+                <>{t("cases.empty.withFilter")}</>
               ) : (
                 <>
-                  <span>Zatím žádné test cases.</span>
+                  <span>{t("cases.empty.noFilter")}</span>
                   <Link href="/cases/new" className="text-[var(--accent)] hover:underline">
-                    + Vytvořit první test case
+                    {t("cases.empty.createFirst")}
                   </Link>
                 </>
               )}
@@ -76,9 +78,9 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
                     <span>{c.owner}</span>
                     <span>·</span>
-                    <span>{c.steps.length} kroků</span>
-                    {c.tags.map((t) => (
-                      <Tag key={t}>#{t}</Tag>
+                    <span>{c.steps.length} {t("cases.step.count")}</span>
+                    {c.tags.map((tag) => (
+                      <Tag key={tag}>#{tag}</Tag>
                     ))}
                   </div>
                 </div>

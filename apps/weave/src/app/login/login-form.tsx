@@ -2,10 +2,12 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
+import { useT } from "@/lib/i18n/context";
 
 export function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
+  const t = useT();
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -21,7 +23,7 @@ export function LoginForm() {
     });
     setBusy(false);
     if (!res.ok) {
-      setError("Špatné heslo");
+      setError(t("login.error.wrong"));
       return;
     }
     const next = params.get("next") ?? "/";
@@ -32,7 +34,7 @@ export function LoginForm() {
   return (
     <form onSubmit={submit} className="space-y-4">
       <div>
-        <label className="mb-1 block text-xs font-medium text-[var(--muted)]">Heslo</label>
+        <label className="mb-1 block text-xs font-medium text-[var(--muted)]">{t("login.password")}</label>
         <input
           type="password"
           autoFocus
@@ -47,7 +49,7 @@ export function LoginForm() {
         disabled={busy}
         className="w-full rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
       >
-        {busy ? "Přihlašuji…" : "Přihlásit"}
+        {busy ? t("login.submitting") : t("login.submit")}
       </button>
     </form>
   );

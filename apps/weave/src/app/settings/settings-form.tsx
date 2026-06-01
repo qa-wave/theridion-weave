@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Check, Copy, Download, HardDrive, Monitor, Server, FolderCode, Unplug } from "lucide-react";
 import type { ConnectionType, IntegrationKey, WeaveSettingsView } from "@/lib/integrations";
 import { INTEGRATION_META, isLocalModule } from "@/lib/integrations";
+import { useT } from "@/lib/i18n/context";
 
 const STANDARD_KEYS: IntegrationKey[] = ["eyes", "net", "runner"];
 const ATLASSIAN_KEYS: IntegrationKey[] = ["jira", "confluence"];
@@ -26,17 +27,6 @@ interface RowState {
   dataDir?: string;
 }
 
-/**
- * Wizard steps for local module install flow.
- *
- * idle         — no wizard open
- * ask          — "Do you have this module installed?"
- * choose-type  — select connection type (app / service / source)
- * enter-app    — enter token + optional dataDir (push-based, type=app)
- * enter-service — enter baseUrl + token (pull-based, type=service)
- * enter-path   — enter source-checkout path (type=source)
- * download     — module not yet installed; show download link
- */
 type WizardStep =
   | "idle"
   | "ask"
@@ -48,19 +38,13 @@ type WizardStep =
 
 interface WizardState {
   step: WizardStep;
-  /** Connection type selected in choose-type step. */
   chosenType: ConnectionType | null;
-  /** Input for source-checkout path. */
   pathInput: string;
-  /** Input for base URL (service type). */
   urlInput: string;
-  /** Input for token. */
   tokenInput: string;
-  /** Input for optional dataDir (app type). */
   dataDirInput: string;
   verifying: boolean;
   verifyError: string | null;
-  /** Copy-to-clipboard feedback. */
   copied: string | null;
 }
 
@@ -76,35 +60,46 @@ const DEFAULT_WIZARD: WizardState = {
   copied: null,
 };
 
-/** Format an ISO timestamp as a short relative/absolute label. */
-function formatLastSeen(iso: string | null): { label: string; healthy: boolean } {
-  if (!iso) return { label: "Nikdy", healthy: false };
-  const d = new Date(iso);
-  const diffMs = Date.now() - d.getTime();
-  const diffMin = Math.round(diffMs / 60_000);
-  const diffHour = Math.round(diffMin / 60);
-  const diffDay = Math.round(diffHour / 24);
-  let label: string;
-  if (diffMin < 2) label = "právě teď";
-  else if (diffMin < 60) label = `před ${diffMin} min`;
-  else if (diffHour < 24) label = `před ${diffHour} h`;
-  else if (diffDay === 1) label = "včera";
-  else label = `před ${diffDay} dny`;
-  // Healthy = seen within 24 hours
-  return { label, healthy: diffMs < 24 * 60 * 60_000 };
-}
-
 interface Props {
   initial: WeaveSettingsView;
   lastSeen: Record<IntegrationKey, string | null>;
-  /** Weave's own origin for building the ingest endpoint hint. */
   origin?: string;
 }
 
 const ALL_KEYS: IntegrationKey[] = [...STANDARD_KEYS, ...ATLASSIAN_KEYS];
 
+type LastSeenResult = { label: string; healthy: boolean };
+
+function computeLastSeen(
+  iso: string | null,
+  labels: {
+    never: string;
+    justNow: string;
+    minutesAgo: (n: number) => string;
+    hoursAgo: (n: number) => string;
+    yesterday: string;
+    daysAgo: (n: number) => string;
+  },
+): LastSeenResult {
+  if (!iso) return { label: labels.never, healthy: false };
+  const d = new Date(iso);
+  const nowMs = new Date().getTime();
+  const diffMs = nowMs - d.getTime();
+  const diffMin = Math.round(diffMs / 60_000);
+  const diffHour = Math.round(diffMin / 60);
+  const diffDay = Math.round(diffHour / 24);
+  let label: string;
+  if (diffMin < 2) label = labels.justNow;
+  else if (diffMin < 60) label = labels.minutesAgo(diffMin);
+  else if (diffHour < 24) label = labels.hoursAgo(diffHour);
+  else if (diffDay === 1) label = labels.yesterday;
+  else label = labels.daysAgo(diffDay);
+  return { label, healthy: diffMs < 24 * 60 * 60_000 };
+}
+
 export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
   const router = useRouter();
+  const t = useT();
   const [rows, setRows] = useState<Record<IntegrationKey, RowState>>(() => {
     const r = {} as Record<IntegrationKey, RowState>;
     for (const k of ALL_KEYS) r[k] = { ...initial[k], token: "" };
@@ -113,7 +108,6 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  // Per-module install wizard state.
   const [wizards, setWizards] = useState<Record<string, WizardState>>({});
 
   function getWizard(k: IntegrationKey): WizardState {
@@ -139,7 +133,6 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
     }
   }
 
-  /** Build the full settings payload for the PUT /api/settings call. */
   function buildPayload(overrides?: Partial<Record<IntegrationKey, Partial<RowState>>>): Record<string, object> {
     const payload: Record<string, object> = {};
     for (const k of ALL_KEYS) {
@@ -182,11 +175,7 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
     }
   }
 
-  /** Persist connection state immediately after wizard completion. */
-  async function persistConnection(
-    k: IntegrationKey,
-    overrides: Partial<RowState>,
-  ) {
+  async function persistConnection(k: IntegrationKey, overrides: Partial<RowState>) {
     patch(k, overrides);
     setBusy(true);
     const payload = buildPayload({ [k]: overrides });
@@ -207,12 +196,11 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
     }
   }
 
-  /** Verify path with the server (source type) and, on success, persist. */
   async function verifyAndConnectSource(k: IntegrationKey) {
     const wizard = getWizard(k);
     const pathVal = wizard.pathInput.trim();
     if (!pathVal) {
-      patchWizard(k, { verifyError: "Zadej cestu ke zdrojáku." });
+      patchWizard(k, { verifyError: t("wizard.verify.pathEmpty") });
       return;
     }
     patchWizard(k, { verifying: true, verifyError: null });
@@ -226,7 +214,7 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
     patchWizard(k, { verifying: false });
 
     if (!res.ok || !body.ok) {
-      patchWizard(k, { verifyError: body.detail ?? body.error ?? `Ověření selhalo (HTTP ${res.status})` });
+      patchWizard(k, { verifyError: body.detail ?? body.error ?? t("wizard.verify.failed", { status: res.status }) });
       return;
     }
 
@@ -239,12 +227,11 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
     });
   }
 
-  /** Verify service URL and, on success, persist. */
   async function verifyAndConnectService(k: IntegrationKey) {
     const wizard = getWizard(k);
     const urlVal = wizard.urlInput.trim();
     if (!urlVal) {
-      patchWizard(k, { verifyError: "Zadej Base URL služby." });
+      patchWizard(k, { verifyError: t("wizard.verify.urlEmpty") });
       return;
     }
     patchWizard(k, { verifying: true, verifyError: null });
@@ -258,7 +245,7 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
     patchWizard(k, { verifying: false });
 
     if (!res.ok || !body.ok) {
-      patchWizard(k, { verifyError: body.detail ?? body.error ?? `Ověření selhalo (HTTP ${res.status})` });
+      patchWizard(k, { verifyError: body.detail ?? body.error ?? t("wizard.verify.failed", { status: res.status }) });
       return;
     }
 
@@ -272,7 +259,6 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
     });
   }
 
-  /** Connect app (push-based) — optionally verify dataDir. */
   async function connectApp(k: IntegrationKey) {
     const wizard = getWizard(k);
     const dataDirVal = wizard.dataDirInput.trim();
@@ -288,7 +274,7 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
       patchWizard(k, { verifying: false });
 
       if (!res.ok || !body.ok) {
-        patchWizard(k, { verifyError: body.detail ?? body.error ?? `Ověření selhalo (HTTP ${res.status})` });
+        patchWizard(k, { verifyError: body.detail ?? body.error ?? t("wizard.verify.failed", { status: res.status }) });
         return;
       }
     }
@@ -303,7 +289,6 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
     });
   }
 
-  /** Disconnect (clear installed + connection fields), persist. */
   async function disconnect(k: IntegrationKey) {
     patchWizard(k, DEFAULT_WIZARD);
     await persistConnection(k, {
@@ -314,15 +299,13 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
     });
   }
 
-  /** Derive connection label from row state. */
   function connectionLabel(row: RowState): string {
-    if (row.connectionType === "app") return "Desktop aplikace (push)";
-    if (row.connectionType === "service") return "Služba (URL)";
-    if (row.connectionType === "source") return "Ze zdrojáku";
+    if (row.connectionType === "app") return t("settings.connection.app");
+    if (row.connectionType === "service") return t("settings.connection.service");
+    if (row.connectionType === "source") return t("settings.connection.source");
     return "";
   }
 
-  /** Derive connected path/url label shown in the "connected" badge area. */
   function connectionDetail(row: RowState): string | null {
     if (row.connectionType === "source") return row.installPath ?? null;
     if (row.connectionType === "service") return row.baseUrl ?? null;
@@ -336,7 +319,14 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
       {ALL_KEYS.map((k) => {
         const meta = INTEGRATION_META[k];
         const row = rows[k];
-        const ls = formatLastSeen(lastSeen[k] ?? null);
+        const ls = computeLastSeen(lastSeen[k] ?? null, {
+          never: t("settings.lastSeen.never"),
+          justNow: t("settings.lastSeen.justNow"),
+          minutesAgo: (n) => t("settings.lastSeen.minutesAgo", { n }),
+          hoursAgo: (n) => t("settings.lastSeen.hoursAgo", { n }),
+          yesterday: t("settings.lastSeen.yesterday"),
+          daysAgo: (n) => t("settings.lastSeen.daysAgo", { n }),
+        });
         const isAtlassian = k === "jira" || k === "confluence";
         const local = isLocalModule(k);
         const wizard = getWizard(k);
@@ -355,14 +345,14 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
                     <>
                       <span
                         className={`inline-block h-2 w-2 rounded-full ${ls.healthy ? "bg-emerald-400" : "bg-zinc-500"}`}
-                        title={ls.healthy ? "Aktivní" : "Žádná data"}
+                        title={ls.healthy ? t("settings.connection.healthy") : t("settings.connection.noData")}
                       />
-                      <span className="text-xs text-[var(--muted)]">Naposledy: {ls.label}</span>
+                      <span className="text-xs text-[var(--muted)]">{t("settings.lastSeen.label")}{ls.label}</span>
                     </>
                   )}
                   {local && row.installed && (
                     <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-400">
-                      <HardDrive size={10} /> {connectionLabel(row) || "Nainstalováno"}
+                      <HardDrive size={10} /> {connectionLabel(row) || t("settings.connection.installed")}
                     </span>
                   )}
                 </div>
@@ -389,7 +379,7 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
                   <div className="flex items-center gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-2">
                     <Check size={14} className="shrink-0 text-emerald-400" />
                     <span className="text-sm text-emerald-300">
-                      {connectionLabel(row) || "Nainstalováno"}
+                      {connectionLabel(row) || t("settings.connection.installed")}
                       {connectionDetail(row) && (
                         <>: <span className="font-mono text-xs">{connectionDetail(row)}</span></>
                       )}
@@ -400,7 +390,7 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
                       disabled={busy}
                       className="ml-auto inline-flex items-center gap-1 rounded text-xs text-[var(--muted)] hover:text-red-400 disabled:opacity-50"
                     >
-                      <Unplug size={12} /> Odpojit
+                      <Unplug size={12} /> {t("wizard.connected.disconnect")}
                     </button>
                   </div>
                 ) : wizard.step === "idle" ? (
@@ -410,40 +400,40 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
                     onClick={() => patchWizard(k, { step: "ask" })}
                     className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--surface-2)]"
                   >
-                    Integrovat modul
+                    {t("wizard.integrate")}
                   </button>
                 ) : wizard.step === "ask" ? (
                   /* Step 1: installed? */
                   <div className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-4">
-                    <p className="text-sm font-medium">Máš tento modul nainstalovaný?</p>
+                    <p className="text-sm font-medium">{t("wizard.ask.title")}</p>
                     <div className="flex gap-2">
                       <button
                         type="button"
                         onClick={() => patchWizard(k, { step: "choose-type", chosenType: defaultCt })}
                         className="rounded-lg bg-[var(--accent)] px-4 py-1.5 text-sm text-white hover:opacity-90"
                       >
-                        Mám
+                        {t("wizard.ask.yes")}
                       </button>
                       <button
                         type="button"
                         onClick={() => patchWizard(k, { step: "download" })}
                         className="rounded-lg border border-[var(--border)] px-4 py-1.5 text-sm hover:bg-[var(--surface)]"
                       >
-                        Nemám
+                        {t("wizard.ask.no")}
                       </button>
                       <button
                         type="button"
                         onClick={() => patchWizard(k, DEFAULT_WIZARD)}
                         className="ml-auto text-xs text-[var(--muted)] hover:text-[var(--foreground)]"
                       >
-                        Zrušit
+                        {t("wizard.ask.cancel")}
                       </button>
                     </div>
                   </div>
                 ) : wizard.step === "choose-type" ? (
                   /* Step 2: choose connection type */
                   <div className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-4">
-                    <p className="text-sm font-medium">Jak chceš modul připojit?</p>
+                    <p className="text-sm font-medium">{t("wizard.chooseType.title")}</p>
                     <div className="grid gap-2 sm:grid-cols-3">
                       <button
                         type="button"
@@ -455,9 +445,9 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
                         }`}
                       >
                         <Monitor size={18} />
-                        <span className="font-medium">Desktop aplikace</span>
+                        <span className="font-medium">{t("wizard.chooseType.app.title")}</span>
                         <span className="text-center text-[var(--muted)]">
-                          Aplikace posílá výsledky sem (push)
+                          {t("wizard.chooseType.app.hint")}
                         </span>
                       </button>
                       <button
@@ -470,9 +460,9 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
                         }`}
                       >
                         <Server size={18} />
-                        <span className="font-medium">Jako služba (URL)</span>
+                        <span className="font-medium">{t("wizard.chooseType.service.title")}</span>
                         <span className="text-center text-[var(--muted)]">
-                          Self-hosted — Weave tahá z URL
+                          {t("wizard.chooseType.service.hint")}
                         </span>
                       </button>
                       <button
@@ -485,9 +475,9 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
                         }`}
                       >
                         <FolderCode size={18} />
-                        <span className="font-medium">Ze zdrojáku</span>
+                        <span className="font-medium">{t("wizard.chooseType.source.title")}</span>
                         <span className="text-center text-[var(--muted)]">
-                          Cesta ke git repozitáři
+                          {t("wizard.chooseType.source.hint")}
                         </span>
                       </button>
                     </div>
@@ -497,24 +487,22 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
                         onClick={() => patchWizard(k, { step: "ask" })}
                         className="text-xs text-[var(--muted)] hover:text-[var(--foreground)]"
                       >
-                        Zpět
+                        {t("wizard.chooseType.back")}
                       </button>
                     </div>
                   </div>
                 ) : wizard.step === "enter-app" ? (
-                  /* Step 3a: app (push) — show ingest endpoint + token */
+                  /* Step 3a: app (push) */
                   <div className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-4">
-                    <p className="text-sm font-medium">Připojení jako desktop aplikace (push)</p>
+                    <p className="text-sm font-medium">{t("wizard.enterApp.title")}</p>
                     <p className="text-xs text-[var(--muted)]">
-                      Vlož tuto URL a token do nastavení publikování v{" "}
-                      <span className="font-medium">{meta.label}</span> — aplikace bude
-                      posílat výsledky sem automaticky.
+                      {t("wizard.enterApp.description", { label: meta.label })}
                     </p>
 
                     {/* Ingest URL */}
                     <div>
                       <label className="mb-1 block text-xs font-medium text-[var(--muted)]">
-                        Ingest URL
+                        {t("wizard.enterApp.ingestUrl")}
                       </label>
                       <div className="flex items-center gap-2">
                         <code className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 font-mono text-xs">
@@ -523,7 +511,7 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
                         <button
                           type="button"
                           onClick={() => void copyToClipboard(ingestEndpoint, "url", k)}
-                          title="Kopírovat"
+                          title="Copy"
                           className="rounded p-1.5 hover:bg-[var(--surface)] text-[var(--muted)]"
                         >
                           {wizard.copied === "url" ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
@@ -534,7 +522,7 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
                     {/* Token */}
                     <div>
                       <label className="mb-1 block text-xs font-medium text-[var(--muted)]">
-                        Token {row.tokenSet && <span className="text-emerald-400">(nastaven)</span>}
+                        {t("settings.token")} {row.tokenSet && <span className="text-emerald-400">({t("settings.tokenSet")})</span>}
                       </label>
                       <div className="flex items-center gap-2">
                         <input
@@ -542,13 +530,13 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
                           type="text"
                           value={wizard.tokenInput}
                           onChange={(e) => patchWizard(k, { tokenInput: e.target.value })}
-                          placeholder={row.tokenSet ? "•••• (ponech prázdné = beze změny)" : "vlož nebo vygeneruj token"}
+                          placeholder={row.tokenSet ? t("settings.token.placeholder.set") : t("settings.token.placeholder.empty")}
                         />
                         {wizard.tokenInput && (
                           <button
                             type="button"
                             onClick={() => void copyToClipboard(wizard.tokenInput, "token", k)}
-                            title="Kopírovat"
+                            title="Copy"
                             className="rounded p-1.5 hover:bg-[var(--surface)] text-[var(--muted)]"
                           >
                             {wizard.copied === "token" ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
@@ -560,8 +548,8 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
                     {/* Optional dataDir */}
                     <div>
                       <label className="mb-1 block text-xs font-medium text-[var(--muted)]">
-                        Datová složka aplikace{" "}
-                        <span className="font-normal text-[var(--muted)]">(volitelné — pro offline sken specifikací)</span>
+                        {t("wizard.enterApp.dataDir")}{" "}
+                        <span className="font-normal text-[var(--muted)]">({t("wizard.enterApp.dataDir.hint")})</span>
                       </label>
                       <input
                         className={input}
@@ -583,23 +571,23 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
                         disabled={wizard.verifying}
                         className="rounded-lg bg-[var(--accent)] px-4 py-1.5 text-sm text-white hover:opacity-90 disabled:opacity-50"
                       >
-                        {wizard.verifying ? "Ověřuji…" : "Připojit"}
+                        {wizard.verifying ? t("wizard.enterApp.connecting") : t("wizard.enterApp.connect")}
                       </button>
                       <button
                         type="button"
                         onClick={() => patchWizard(k, { step: "choose-type", verifyError: null })}
                         className="rounded-lg border border-[var(--border)] px-4 py-1.5 text-sm hover:bg-[var(--surface)]"
                       >
-                        Zpět
+                        {t("wizard.enterApp.back")}
                       </button>
                     </div>
                   </div>
                 ) : wizard.step === "enter-service" ? (
                   /* Step 3b: service (URL) */
                   <div className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-4">
-                    <p className="text-sm font-medium">Připojení jako self-hosted služba</p>
+                    <p className="text-sm font-medium">{t("wizard.enterService.title")}</p>
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-[var(--muted)]">Base URL</label>
+                      <label className="mb-1 block text-xs font-medium text-[var(--muted)]">{t("settings.baseUrl")}</label>
                       <input
                         className={input}
                         type="text"
@@ -613,14 +601,14 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
                     </div>
                     <div>
                       <label className="mb-1 block text-xs font-medium text-[var(--muted)]">
-                        Token {row.tokenSet && <span className="text-emerald-400">(nastaven)</span>}
+                        {t("settings.token")} {row.tokenSet && <span className="text-emerald-400">({t("settings.tokenSet")})</span>}
                       </label>
                       <input
                         className={input}
                         type="password"
                         value={wizard.tokenInput}
                         onChange={(e) => patchWizard(k, { tokenInput: e.target.value })}
-                        placeholder={row.tokenSet ? "•••• (ponech prázdné = beze změny)" : "vlož token"}
+                        placeholder={row.tokenSet ? t("settings.token.placeholder.set") : t("settings.token.placeholder.empty")}
                       />
                     </div>
                     {wizard.verifyError && (
@@ -633,21 +621,21 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
                         disabled={wizard.verifying}
                         className="rounded-lg bg-[var(--accent)] px-4 py-1.5 text-sm text-white hover:opacity-90 disabled:opacity-50"
                       >
-                        {wizard.verifying ? "Ověřuji…" : "Ověřit a připojit"}
+                        {wizard.verifying ? t("wizard.enterService.connecting") : t("wizard.enterService.connect")}
                       </button>
                       <button
                         type="button"
                         onClick={() => patchWizard(k, { step: "choose-type", verifyError: null })}
                         className="rounded-lg border border-[var(--border)] px-4 py-1.5 text-sm hover:bg-[var(--surface)]"
                       >
-                        Zpět
+                        {t("wizard.enterService.back")}
                       </button>
                     </div>
                   </div>
                 ) : wizard.step === "enter-path" ? (
                   /* Step 3c: source checkout path */
                   <div className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-4">
-                    <p className="text-sm font-medium">Cesta ke zdrojovému kódu modulu</p>
+                    <p className="text-sm font-medium">{t("wizard.enterPath.title")}</p>
                     <input
                       className={input}
                       type="text"
@@ -668,21 +656,21 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
                         disabled={wizard.verifying}
                         className="rounded-lg bg-[var(--accent)] px-4 py-1.5 text-sm text-white hover:opacity-90 disabled:opacity-50"
                       >
-                        {wizard.verifying ? "Ověřuji…" : "Ověřit a připojit"}
+                        {wizard.verifying ? t("wizard.enterPath.connecting") : t("wizard.enterPath.connect")}
                       </button>
                       <button
                         type="button"
                         onClick={() => patchWizard(k, { step: "choose-type", verifyError: null })}
                         className="rounded-lg border border-[var(--border)] px-4 py-1.5 text-sm hover:bg-[var(--surface)]"
                       >
-                        Zpět
+                        {t("wizard.enterPath.back")}
                       </button>
                     </div>
                   </div>
                 ) : wizard.step === "download" ? (
                   /* Step: download panel */
                   <div className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-4">
-                    <p className="text-sm font-medium">Stáhni a nainstaluj modul</p>
+                    <p className="text-sm font-medium">{t("wizard.download.title")}</p>
                     {meta.downloadUrl && (
                       <a
                         href={meta.downloadUrl}
@@ -690,7 +678,7 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-2 rounded-lg bg-[var(--accent)] px-4 py-1.5 text-sm text-white hover:opacity-90"
                       >
-                        <Download size={14} /> Stáhnout
+                        <Download size={14} /> {t("wizard.download.button")}
                       </a>
                     )}
                     {meta.installHint && (
@@ -701,7 +689,7 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
                       onClick={() => patchWizard(k, { step: "choose-type", chosenType: defaultCt, verifyError: null })}
                       className="text-xs text-[var(--accent)] underline-offset-2 hover:underline"
                     >
-                      Už mám — vybrat způsob připojení
+                      {t("wizard.download.alreadyHave")}
                     </button>
                     <div className="pt-1">
                       <button
@@ -709,7 +697,7 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
                         onClick={() => patchWizard(k, DEFAULT_WIZARD)}
                         className="text-xs text-[var(--muted)] hover:text-[var(--foreground)]"
                       >
-                        Zrušit
+                        {t("wizard.download.cancel")}
                       </button>
                     </div>
                   </div>
@@ -718,11 +706,9 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
             )}
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              {/* For local modules connected as 'app' or 'source', hide the Base URL field
-                  (they don't use it; the UI would be confusing). For 'service' and non-local, show it. */}
               {(!local || !row.installed || row.connectionType === "service" || !row.connectionType) && (
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-[var(--muted)]">Base URL</label>
+                  <label className="mb-1 block text-xs font-medium text-[var(--muted)]">{t("settings.baseUrl")}</label>
                   <input
                     className={input}
                     disabled={!row.enabled}
@@ -734,7 +720,7 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
               )}
               <div>
                 <label className="mb-1 block text-xs font-medium text-[var(--muted)]">
-                  Token {row.tokenSet && <span className="text-emerald-400">(nastaven)</span>}
+                  {t("settings.token")} {row.tokenSet && <span className="text-emerald-400">({t("settings.tokenSet")})</span>}
                 </label>
                 <input
                   className={input}
@@ -742,13 +728,13 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
                   disabled={!row.enabled}
                   value={row.token}
                   onChange={(e) => patch(k, { token: e.target.value })}
-                  placeholder={row.tokenSet ? "•••••••• (ponech prázdné = beze změny)" : "vlož token"}
+                  placeholder={row.tokenSet ? t("settings.token.placeholder.set") : t("settings.token.placeholder.empty")}
                 />
               </div>
               {isAtlassian && (
                 <>
                   <div>
-                    <label className="mb-1 block text-xs font-medium text-[var(--muted)]">E-mail (Basic auth)</label>
+                    <label className="mb-1 block text-xs font-medium text-[var(--muted)]">{t("settings.email")}</label>
                     <input
                       className={input}
                       disabled={!row.enabled}
@@ -760,7 +746,7 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
                   {k === "jira" && (
                     <>
                       <div>
-                        <label className="mb-1 block text-xs font-medium text-[var(--muted)]">Project key</label>
+                        <label className="mb-1 block text-xs font-medium text-[var(--muted)]">{t("settings.projectKey")}</label>
                         <input
                           className={input}
                           disabled={!row.enabled}
@@ -771,7 +757,7 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
                       </div>
                       <div className="sm:col-span-2">
                         <label className="mb-1 block text-xs font-medium text-[var(--muted)]">
-                          Status → Jira transition map (JSON, e.g. {'{'}&#34;active&#34;:&#34;Start Progress&#34;{'}'})
+                          {t("settings.statusMap")}
                         </label>
                         <textarea
                           className={input}
@@ -786,7 +772,7 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
                   )}
                   {k === "confluence" && (
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-[var(--muted)]">Space key</label>
+                      <label className="mb-1 block text-xs font-medium text-[var(--muted)]">{t("settings.spaceKey")}</label>
                       <input
                         className={input}
                         disabled={!row.enabled}
@@ -810,11 +796,11 @@ export function SettingsForm({ initial, lastSeen, origin = "" }: Props) {
           disabled={busy}
           className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
         >
-          {busy ? "Ukládám…" : "Uložit nastavení"}
+          {busy ? t("settings.saving") : t("settings.save")}
         </button>
         {saved && (
           <span className="flex items-center gap-1 text-sm text-emerald-400">
-            <Check size={16} /> Uloženo
+            <Check size={16} /> {t("settings.saved")}
           </span>
         )}
       </div>

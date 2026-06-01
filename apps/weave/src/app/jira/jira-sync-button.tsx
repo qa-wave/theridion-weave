@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { RefreshCw } from "lucide-react";
+import { useT } from "@/lib/i18n/context";
 
 type MirrorEntity = "test" | "script" | "run";
 
@@ -11,6 +12,7 @@ interface Props {
 }
 
 export function JiraSyncButton({ entity, id }: Props) {
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ jiraKey?: string; error?: string } | null>(null);
 
@@ -25,7 +27,7 @@ export function JiraSyncButton({ entity, id }: Props) {
     const body = await res.json().catch(() => ({}));
     setBusy(false);
     if (!res.ok) {
-      setResult({ error: (body as { error?: string }).error ?? "Sync selhal" });
+      setResult({ error: (body as { error?: string }).error ?? t("jiraSyncButton.error.default") });
     } else {
       setResult({ jiraKey: (body as { jiraKey?: string }).jiraKey });
     }
@@ -40,7 +42,7 @@ export function JiraSyncButton({ entity, id }: Props) {
         className="flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-xs hover:border-[var(--accent)] disabled:opacity-50"
       >
         <RefreshCw size={12} className={busy ? "animate-spin" : ""} />
-        Sync
+        {t("jiraSyncButton.sync")}
       </button>
       {result?.jiraKey && <span className="text-xs text-emerald-400">{result.jiraKey}</span>}
       {result?.error && <span className="text-xs text-red-400">{result.error}</span>}

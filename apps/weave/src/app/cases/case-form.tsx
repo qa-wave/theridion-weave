@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
+import { useT } from "@/lib/i18n/context";
 
 interface StepDraft {
   action: string;
@@ -15,6 +16,7 @@ const labelCls = "mb-1 block text-xs font-medium text-[var(--muted)]";
 
 export function CaseForm() {
   const router = useRouter();
+  const t = useT();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [owner, setOwner] = useState("");
@@ -42,7 +44,7 @@ export function CaseForm() {
       priority,
       status,
       type: "manual" as const,
-      tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
+      tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean),
       expectedResult,
       caseKey: caseKey.trim() || undefined,
       steps: steps
@@ -57,7 +59,7 @@ export function CaseForm() {
     setSaving(false);
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      setError(body.error ?? "Uložení selhalo");
+      setError(body.error ?? t("caseForm.error.default"));
       return;
     }
     const created = await res.json();
@@ -68,24 +70,24 @@ export function CaseForm() {
   return (
     <form onSubmit={submit} className="space-y-5">
       <div>
-        <label className={labelCls}>Název *</label>
+        <label className={labelCls}>{t("caseForm.name")}</label>
         <input className={input} value={title} onChange={(e) => setTitle(e.target.value)} required />
       </div>
       <div>
-        <label className={labelCls}>Popis</label>
+        <label className={labelCls}>{t("caseForm.description")}</label>
         <textarea className={input} rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className={labelCls}>Owner *</label>
+          <label className={labelCls}>{t("caseForm.owner")}</label>
           <input className={input} value={owner} onChange={(e) => setOwner(e.target.value)} required placeholder="qa@qawave.ai" />
         </div>
         <div>
-          <label className={labelCls}>Tagy (čárkou)</label>
-          <input className={input} value={tags} onChange={(e) => setTags(e.target.value)} placeholder="auth, smoke" />
+          <label className={labelCls}>{t("caseForm.tags")}</label>
+          <input className={input} value={tags} onChange={(e) => setTags(e.target.value)} placeholder={t("caseForm.tags.placeholder")} />
         </div>
         <div>
-          <label className={labelCls}>Priorita</label>
+          <label className={labelCls}>{t("caseForm.priority")}</label>
           <select className={input} value={priority} onChange={(e) => setPriority(e.target.value)}>
             <option value="low">low</option>
             <option value="medium">medium</option>
@@ -94,7 +96,7 @@ export function CaseForm() {
           </select>
         </div>
         <div>
-          <label className={labelCls}>Stav</label>
+          <label className={labelCls}>{t("caseForm.status")}</label>
           <select className={input} value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="draft">draft</option>
             <option value="active">active</option>
@@ -103,9 +105,9 @@ export function CaseForm() {
         </div>
         <div className="col-span-2">
           <label className={labelCls}>
-            Case Key{" "}
+            {t("caseForm.caseKey")}{" "}
             <span className="font-normal text-[var(--muted)]">
-              (volitelný stabilní klíč pro párování s automatizovanými běhy)
+              ({t("caseForm.caseKey.hint")})
             </span>
           </label>
           <input
@@ -119,13 +121,13 @@ export function CaseForm() {
 
       <div>
         <div className="mb-2 flex items-center justify-between">
-          <label className={labelCls}>Kroky</label>
+          <label className={labelCls}>{t("caseForm.steps")}</label>
           <button
             type="button"
             onClick={() => setSteps((p) => [...p, { action: "", expectedResult: "" }])}
             className="flex items-center gap-1 text-xs text-[var(--accent)] hover:underline"
           >
-            <Plus size={14} /> Přidat krok
+            <Plus size={14} /> {t("caseForm.steps.addStep")}
           </button>
         </div>
         <div className="space-y-2">
@@ -134,13 +136,13 @@ export function CaseForm() {
               <span className="mt-2 w-5 text-xs text-[var(--muted)]">{i + 1}.</span>
               <input
                 className={input}
-                placeholder="Akce"
+                placeholder={t("caseForm.step.action.placeholder")}
                 value={s.action}
                 onChange={(e) => setStep(i, { action: e.target.value })}
               />
               <input
                 className={input}
-                placeholder="Očekávaný výsledek"
+                placeholder={t("caseForm.step.expected.placeholder")}
                 value={s.expectedResult}
                 onChange={(e) => setStep(i, { expectedResult: e.target.value })}
               />
@@ -148,7 +150,7 @@ export function CaseForm() {
                 type="button"
                 onClick={() => setSteps((p) => p.filter((_, idx) => idx !== i))}
                 className="mt-2 text-[var(--muted)] hover:text-red-400"
-                aria-label="Smazat krok"
+                aria-label={t("caseForm.step.delete.aria")}
               >
                 <Trash2 size={16} />
               </button>
@@ -158,7 +160,7 @@ export function CaseForm() {
       </div>
 
       <div>
-        <label className={labelCls}>Očekávaný výsledek (celkový)</label>
+        <label className={labelCls}>{t("caseForm.expectedResult")}</label>
         <input className={input} value={expectedResult} onChange={(e) => setExpectedResult(e.target.value)} />
       </div>
 
@@ -170,7 +172,7 @@ export function CaseForm() {
           disabled={saving}
           className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
         >
-          {saving ? "Ukládám…" : "Vytvořit test case"}
+          {saving ? t("caseForm.submitting") : t("caseForm.submit")}
         </button>
       </div>
     </form>

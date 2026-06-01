@@ -3,6 +3,7 @@ import { Plus } from "lucide-react";
 import { listTestScripts } from "@/data/store";
 import { Card, PageHeader, ScriptStatusBadge, Tag } from "@/components/ui";
 import { formatRelativeTime } from "@/lib/utils";
+import { getServerT } from "@/lib/i18n/server";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,7 @@ interface SearchParams {
 }
 
 export default async function ScriptsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const t = await getServerT();
   const sp = await searchParams;
   const scripts = await listTestScripts({ product: sp.product, status: sp.status });
   const hasFilter = Boolean(sp.product || sp.status);
@@ -19,14 +21,14 @@ export default async function ScriptsPage({ searchParams }: { searchParams: Prom
   return (
     <>
       <PageHeader
-        title="Skripty"
-        description="Automatizované testovací skripty — Eyes (FE) a Net (BE). Filtruj podle produktu nebo stavu."
+        title={t("scripts.title")}
+        description={t("scripts.description")}
         action={
           <Link
             href="/scripts/new"
             className="flex items-center gap-2 rounded-lg bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white hover:opacity-90"
           >
-            <Plus size={16} /> Nový skript
+            <Plus size={16} /> {t("scripts.new")}
           </Link>
         }
       />
@@ -39,7 +41,7 @@ export default async function ScriptsPage({ searchParams }: { searchParams: Prom
         <FilterLink param="status" value="draft" current={sp.status} label="draft" />
         {hasFilter && (
           <Link href="/scripts" className="text-[var(--accent)] hover:underline">
-            × zrušit filtry
+            {t("scripts.filter.cancelFilters")}
           </Link>
         )}
       </div>
@@ -49,12 +51,12 @@ export default async function ScriptsPage({ searchParams }: { searchParams: Prom
           {scripts.length === 0 && (
             <div className="flex flex-col items-center gap-3 p-10 text-center text-sm text-[var(--muted)]">
               {hasFilter ? (
-                <>Žádné skripty neodpovídají filtru.</>
+                <>{t("scripts.empty.withFilter")}</>
               ) : (
                 <>
-                  <span>Zatím žádné skripty.</span>
+                  <span>{t("scripts.empty.noFilter")}</span>
                   <Link href="/scripts/new" className="text-[var(--accent)] hover:underline">
-                    + Vytvořit první skript
+                    {t("scripts.empty.createFirst")}
                   </Link>
                 </>
               )}

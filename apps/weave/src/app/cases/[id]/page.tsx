@@ -4,10 +4,12 @@ import { ArrowLeft } from "lucide-react";
 import { getTestCase, listTestRuns } from "@/data/store";
 import { Card, CaseStatusBadge, PageHeader, PriorityBadge, ResultBadge, Tag } from "@/components/ui";
 import { formatDateTime } from "@/lib/utils";
+import { getServerT } from "@/lib/i18n/server";
 
 export const dynamic = "force-dynamic";
 
 export default async function CaseDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const t = await getServerT();
   const { id } = await params;
   const tc = await getTestCase(id);
   if (!tc) notFound();
@@ -21,7 +23,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
   return (
     <>
       <Link href="/cases" className="mb-4 inline-flex items-center gap-1 text-sm text-[var(--muted)] hover:text-[var(--foreground)]">
-        <ArrowLeft size={14} /> Test cases
+        <ArrowLeft size={14} /> {t("caseDetail.backLink")}
       </Link>
       <PageHeader
         title={tc.title}
@@ -31,14 +33,14 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
           <Card>
-            <h2 className="mb-2 text-sm font-semibold text-[var(--muted)]">Popis</h2>
+            <h2 className="mb-2 text-sm font-semibold text-[var(--muted)]">{t("caseDetail.description")}</h2>
             <p className="text-sm">{tc.description || "—"}</p>
           </Card>
 
           <Card>
-            <h2 className="mb-3 text-sm font-semibold text-[var(--muted)]">Kroky</h2>
+            <h2 className="mb-3 text-sm font-semibold text-[var(--muted)]">{t("caseDetail.steps")}</h2>
             <ol className="space-y-3">
-              {tc.steps.length === 0 && <li className="text-sm text-[var(--muted)]">Bez kroků.</li>}
+              {tc.steps.length === 0 && <li className="text-sm text-[var(--muted)]">{t("caseDetail.steps.empty")}</li>}
               {tc.steps.map((s) => (
                 <li key={s.order} className="flex gap-3">
                   <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--surface-2)] text-xs">
@@ -52,15 +54,15 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
               ))}
             </ol>
             <div className="mt-4 rounded-lg bg-[var(--surface-2)] p-3 text-sm">
-              <span className="text-[var(--muted)]">Očekávaný výsledek: </span>
+              <span className="text-[var(--muted)]">{t("caseDetail.expectedResult")}</span>
               {tc.expectedResult || "—"}
             </div>
           </Card>
 
           <Card>
-            <h2 className="mb-3 text-sm font-semibold text-[var(--muted)]">Výskyt v bězích</h2>
+            <h2 className="mb-3 text-sm font-semibold text-[var(--muted)]">{t("caseDetail.runsTitle")}</h2>
             <div className="space-y-2">
-              {related.length === 0 && <div className="text-sm text-[var(--muted)]">Zatím žádné běhy.</div>}
+              {related.length === 0 && <div className="text-sm text-[var(--muted)]">{t("caseDetail.runsEmpty")}</div>}
               {related.map(({ run, res }, i) => (
                 <div key={`${run.id}-${i}`} className="flex items-center justify-between rounded-lg bg-[var(--surface-2)] px-3 py-2 text-sm">
                   <span>{run.label ?? run.id}</span>
@@ -78,21 +80,21 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
           <Card>
             <dl className="space-y-3 text-sm">
               <div>
-                <dt className="text-xs text-[var(--muted)]">Owner</dt>
+                <dt className="text-xs text-[var(--muted)]">{t("caseDetail.owner")}</dt>
                 <dd>{tc.owner}</dd>
               </div>
               <div>
-                <dt className="text-xs text-[var(--muted)]">Tagy</dt>
+                <dt className="text-xs text-[var(--muted)]">{t("caseDetail.tags")}</dt>
                 <dd className="mt-1 flex flex-wrap gap-1">
-                  {tc.tags.length ? tc.tags.map((t) => <Tag key={t}>#{t}</Tag>) : "—"}
+                  {tc.tags.length ? tc.tags.map((tag) => <Tag key={tag}>#{tag}</Tag>) : "—"}
                 </dd>
               </div>
               <div>
-                <dt className="text-xs text-[var(--muted)]">Vytvořeno</dt>
+                <dt className="text-xs text-[var(--muted)]">{t("caseDetail.createdAt")}</dt>
                 <dd>{formatDateTime(tc.createdAt)}</dd>
               </div>
               <div>
-                <dt className="text-xs text-[var(--muted)]">Upraveno</dt>
+                <dt className="text-xs text-[var(--muted)]">{t("caseDetail.updatedAt")}</dt>
                 <dd>{formatDateTime(tc.updatedAt)}</dd>
               </div>
             </dl>

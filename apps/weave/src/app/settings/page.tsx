@@ -5,10 +5,12 @@ import type { IntegrationKey } from "@/lib/integrations";
 import { loadSettings } from "@/lib/integrations.server";
 import { getLastSeen } from "@/data/store";
 import { SettingsForm } from "./settings-form";
+import { getServerT } from "@/lib/i18n/server";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
+  const t = await getServerT();
   const [settings, eyesLastSeen, netLastSeen, runnerLastSeen, hdrs] = await Promise.all([
     loadSettings(),
     getLastSeen("eyes"),
@@ -33,8 +35,8 @@ export default async function SettingsPage() {
   return (
     <>
       <PageHeader
-        title="Nastavení · Integrace"
-        description="Zapni napojení na ostatní Theridion nástroje. Po zapnutí Weave přijímá/páruje jejich výsledky."
+        title={t("settings.title")}
+        description={t("settings.description")}
       />
       <SettingsForm initial={maskSettings(settings)} lastSeen={lastSeen} origin={origin} />
     </>

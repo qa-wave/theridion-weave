@@ -5,20 +5,8 @@ import { usePathname } from "next/navigation";
 import { LayoutDashboard, ListChecks, FolderKanban, PlayCircle, Settings, BookText, Code2, Link2, Puzzle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { IntegrationKey } from "@/lib/integrations";
-
-const BASE_ITEMS_BEFORE_CASES = [
-  { href: "/", label: "Přehled", icon: LayoutDashboard },
-  { href: "/cases", label: "Test cases", icon: ListChecks },
-];
-
-const BASE_ITEMS_AFTER_CASES = [
-  { href: "/scripts", label: "Skripty", icon: Code2 },
-  { href: "/plans", label: "Plány", icon: FolderKanban },
-  { href: "/runs", label: "Běhy", icon: PlayCircle },
-  { href: "/requirements", label: "Požadavky", icon: BookText },
-  { href: "/jira", label: "Jira", icon: Link2 },
-  { href: "/settings", label: "Nastavení", icon: Settings },
-];
+import { useT } from "@/lib/i18n/context";
+import { LangSwitcher } from "./lang-switcher";
 
 interface NavProps {
   /** Installed local modules to show as extra tabs right after "Test cases". */
@@ -27,6 +15,21 @@ interface NavProps {
 
 export function Nav({ installedModules = [] }: NavProps) {
   const pathname = usePathname();
+  const t = useT();
+
+  const BASE_ITEMS_BEFORE_CASES = [
+    { href: "/", label: t("nav.overview"), icon: LayoutDashboard },
+    { href: "/cases", label: t("nav.cases"), icon: ListChecks },
+  ];
+
+  const BASE_ITEMS_AFTER_CASES = [
+    { href: "/scripts", label: t("nav.scripts"), icon: Code2 },
+    { href: "/plans", label: t("nav.plans"), icon: FolderKanban },
+    { href: "/runs", label: t("nav.runs"), icon: PlayCircle },
+    { href: "/requirements", label: t("nav.requirements"), icon: BookText },
+    { href: "/jira", label: t("nav.jira"), icon: Link2 },
+    { href: "/settings", label: t("nav.settings"), icon: Settings },
+  ];
 
   const moduleItems = installedModules.map(({ key, label }) => ({
     href: `/modules/${key}`,
@@ -71,8 +74,9 @@ export function Nav({ installedModules = [] }: NavProps) {
           );
         })}
       </nav>
-      <div className="mt-auto px-2 pt-6 text-xs text-[var(--muted)]">
-        Test management nad manuálními testy + Eyes &amp; Net.
+      <div className="mt-auto flex flex-col gap-2 px-2 pt-6">
+        <p className="text-xs text-[var(--muted)]">{t("nav.tagline")}</p>
+        <LangSwitcher />
       </div>
     </aside>
   );

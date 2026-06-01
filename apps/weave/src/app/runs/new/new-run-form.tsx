@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { TestPlan } from "@/lib/types";
+import { useT } from "@/lib/i18n/context";
 
 const input =
   "w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]";
@@ -14,6 +15,7 @@ interface Props {
 
 export function NewRunForm({ plans }: Props) {
   const router = useRouter();
+  const t = useT();
   const [planId, setPlanId] = useState(plans[0]?.id ?? "");
   const [triggeredBy, setTriggeredBy] = useState("qa@qawave.ai");
   const [label, setLabel] = useState("");
@@ -34,7 +36,7 @@ export function NewRunForm({ plans }: Props) {
     setSaving(false);
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      setError((body as { error?: string }).error ?? "Vytvoření selhalo");
+      setError((body as { error?: string }).error ?? t("newRunForm.error.default"));
       return;
     }
     const created = await res.json();
@@ -45,7 +47,7 @@ export function NewRunForm({ plans }: Props) {
   return (
     <form onSubmit={submit} className="space-y-5">
       <div>
-        <label className={labelCls}>Test plán *</label>
+        <label className={labelCls}>{t("newRunForm.plan")}</label>
         <select
           className={input}
           value={planId}
@@ -63,14 +65,14 @@ export function NewRunForm({ plans }: Props) {
         )}
         {selectedPlan && (
           <p className="mt-1 text-xs text-[var(--muted)]">
-            {selectedPlan.testCaseIds.length} test cases
+            {selectedPlan.testCaseIds.length} {t("plans.caseCount")}
           </p>
         )}
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className={labelCls}>Spouští *</label>
+          <label className={labelCls}>{t("newRunForm.triggeredBy")}</label>
           <input
             className={input}
             value={triggeredBy}
@@ -80,12 +82,12 @@ export function NewRunForm({ plans }: Props) {
           />
         </div>
         <div>
-          <label className={labelCls}>Label / verze</label>
+          <label className={labelCls}>{t("newRunForm.label")}</label>
           <input
             className={input}
             value={label}
             onChange={(e) => setLabel(e.target.value)}
-            placeholder="release-2.5.0"
+            placeholder={t("newRunForm.label.placeholder")}
           />
         </div>
       </div>
@@ -98,7 +100,7 @@ export function NewRunForm({ plans }: Props) {
           disabled={saving || !planId}
           className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
         >
-          {saving ? "Připravuji…" : "Spustit běh"}
+          {saving ? t("newRunForm.submitting") : t("newRunForm.submit")}
         </button>
       </div>
     </form>

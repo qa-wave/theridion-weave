@@ -5,10 +5,12 @@ import { maskSettings } from "@/lib/integrations";
 import { loadSettings } from "@/lib/integrations.server";
 import { Card, CaseStatusBadge, PageHeader, ScriptStatusBadge, RunStatusBadge, Tag } from "@/components/ui";
 import { JiraSyncButton } from "./jira-sync-button";
+import { getServerT } from "@/lib/i18n/server";
 
 export const dynamic = "force-dynamic";
 
 export default async function JiraPage() {
+  const t = await getServerT();
   const [settings, cases, scripts, runs] = await Promise.all([
     loadSettings(),
     listTestCases(),
@@ -26,16 +28,16 @@ export default async function JiraPage() {
   return (
     <>
       <PageHeader
-        title="Jira"
-        description="Mirror Weave entit do Jira issues. Spusť sync pro vytvoření nebo aktualizaci."
+        title={t("jira.title")}
+        description={t("jira.description")}
       />
 
       {!jiraEnabled && (
         <Card className="mb-6 border-amber-500/40 bg-amber-500/5">
           <p className="text-sm text-amber-300">
-            Jira integrace není zapnuta.{" "}
+            {t("jira.notConfigured")}{" "}
             <Link href="/settings" className="underline hover:text-[var(--foreground)]">
-              Přejdi do Nastavení
+              {t("jira.notConfigured.goSettings")}
             </Link>{" "}
             a nakonfiguruj Jira.
           </p>
@@ -45,7 +47,7 @@ export default async function JiraPage() {
       <div className="space-y-6">
         {/* Test cases */}
         <Card>
-          <h2 className="mb-3 text-sm font-semibold">Test cases ({syncedCases.length} synced)</h2>
+          <h2 className="mb-3 text-sm font-semibold">{t("jira.cases.title")} ({syncedCases.length} synced)</h2>
           <div className="divide-y divide-[var(--border)]">
             {cases.map((c) => (
               <div key={c.id} className="flex items-center justify-between py-2 text-sm">
@@ -66,13 +68,13 @@ export default async function JiraPage() {
                 <JiraSyncButton entity="test" id={c.id} />
               </div>
             ))}
-            {cases.length === 0 && <div className="py-4 text-sm text-[var(--muted)]">Žádné test cases.</div>}
+            {cases.length === 0 && <div className="py-4 text-sm text-[var(--muted)]">{t("jira.cases.empty")}</div>}
           </div>
         </Card>
 
         {/* Scripts */}
         <Card>
-          <h2 className="mb-3 text-sm font-semibold">Skripty ({syncedScripts.length} synced)</h2>
+          <h2 className="mb-3 text-sm font-semibold">{t("jira.scripts.title")} ({syncedScripts.length} synced)</h2>
           <div className="divide-y divide-[var(--border)]">
             {scripts.map((s) => (
               <div key={s.id} className="flex items-center justify-between py-2 text-sm">
@@ -94,13 +96,13 @@ export default async function JiraPage() {
                 <JiraSyncButton entity="script" id={s.id} />
               </div>
             ))}
-            {scripts.length === 0 && <div className="py-4 text-sm text-[var(--muted)]">Žádné skripty.</div>}
+            {scripts.length === 0 && <div className="py-4 text-sm text-[var(--muted)]">{t("jira.scripts.empty")}</div>}
           </div>
         </Card>
 
         {/* Runs */}
         <Card>
-          <h2 className="mb-3 text-sm font-semibold">Běhy ({syncedRuns.length} synced)</h2>
+          <h2 className="mb-3 text-sm font-semibold">{t("jira.runs.title")} ({syncedRuns.length} synced)</h2>
           <div className="divide-y divide-[var(--border)]">
             {runs.map((r) => (
               <div key={r.id} className="flex items-center justify-between py-2 text-sm">
@@ -121,7 +123,7 @@ export default async function JiraPage() {
                 <JiraSyncButton entity="run" id={r.id} />
               </div>
             ))}
-            {runs.length === 0 && <div className="py-4 text-sm text-[var(--muted)]">Žádné běhy.</div>}
+            {runs.length === 0 && <div className="py-4 text-sm text-[var(--muted)]">{t("jira.runs.empty")}</div>}
           </div>
         </Card>
       </div>

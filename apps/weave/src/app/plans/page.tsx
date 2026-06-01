@@ -2,24 +2,26 @@ import Link from "next/link";
 import { listTestCases, listTestPlans } from "@/data/store";
 import { Card, PageHeader } from "@/components/ui";
 import { formatRelativeTime } from "@/lib/utils";
+import { getServerT } from "@/lib/i18n/server";
 
 export const dynamic = "force-dynamic";
 
 export default async function PlansPage() {
+  const t = await getServerT();
   const [plans, cases] = await Promise.all([listTestPlans(), listTestCases()]);
   const byId = new Map(cases.map((c) => [c.id, c]));
 
   return (
     <>
       <PageHeader
-        title="Test plány"
-        description="Sady test cases spouštěné dohromady — typicky před releasem nebo jako regrese."
+        title={t("plans.title")}
+        description={t("plans.description")}
       />
       {plans.length === 0 ? (
         <Card className="flex flex-col items-center gap-2 py-10 text-center text-sm text-[var(--muted)]">
-          <span>Zatím žádné test plány. Plán potřebuje alespoň jeden test case.</span>
+          <span>{t("plans.empty")}</span>
           <Link href="/cases" className="text-[var(--accent)] hover:underline">
-            Přejít na test cases
+            {t("plans.empty.goToCases")}
           </Link>
         </Card>
       ) : (
@@ -47,7 +49,7 @@ export default async function PlansPage() {
                     </Link>
                   ))}
                 </div>
-                <div className="mt-3 text-xs text-[var(--muted)]">{planCases.length} test cases</div>
+                <div className="mt-3 text-xs text-[var(--muted)]">{planCases.length} {t("plans.caseCount")}</div>
               </Card>
             );
           })}

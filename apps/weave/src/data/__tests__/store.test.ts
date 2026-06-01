@@ -18,7 +18,7 @@ describe("store — test cases (in-memory mode)", () => {
   it("creates a case with generated id and timestamps", async () => {
     const before = (await listTestCases()).length;
     const created = await createTestCase({
-      title: "Nový",
+      title: "New",
       description: "",
       steps: [],
       expectedResult: "",
@@ -31,6 +31,13 @@ describe("store — test cases (in-memory mode)", () => {
     expect(created.id).toMatch(/^tc-/);
     expect((await listTestCases()).length).toBe(before + 1);
     expect((await listTestCases({ tag: "x" })).some((c) => c.id === created.id)).toBe(true);
+  });
+
+  it("seed titles are in English", async () => {
+    const cases = await listTestCases();
+    const loginHappy = cases.find((c) => c.id === "tc-login-happy");
+    expect(loginHappy).toBeDefined();
+    expect(loginHappy?.title).toBe("Login with valid credentials");
   });
 });
 

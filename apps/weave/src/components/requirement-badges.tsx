@@ -1,5 +1,8 @@
+"use client";
+
 import { cn } from "@/lib/utils";
 import type { RequirementPriority, RequirementStatus } from "@/lib/types";
+import { useT } from "@/lib/i18n/context";
 
 const statusColors: Record<RequirementStatus, string> = {
   open: "bg-sky-500/15 text-sky-300 border-sky-500/30",
@@ -8,17 +11,17 @@ const statusColors: Record<RequirementStatus, string> = {
   deprecated: "bg-zinc-600/20 text-zinc-400 border-zinc-600/30",
 };
 
-const statusLabels: Record<RequirementStatus, string> = {
-  open: "Otevřeno",
-  in_progress: "Probíhá",
-  done: "Hotovo",
-  deprecated: "Zastaralé",
-};
-
 export function RequirementStatusBadge({ status }: { status: RequirementStatus }) {
+  const t = useT();
+  const labels: Record<RequirementStatus, string> = {
+    open: t("requirementStatus.open"),
+    in_progress: t("requirementStatus.in_progress"),
+    done: t("requirementStatus.done"),
+    deprecated: t("requirementStatus.deprecated"),
+  };
   return (
     <span className={cn("inline-block rounded-md border px-2 py-0.5 text-xs font-medium", statusColors[status])}>
-      {statusLabels[status]}
+      {labels[status]}
     </span>
   );
 }

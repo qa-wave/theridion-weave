@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { RefreshCw } from "lucide-react";
+import { useT } from "@/lib/i18n/context";
 
 interface SyncResult {
   scriptsSynced: number;
@@ -9,6 +10,7 @@ interface SyncResult {
 }
 
 export function ModuleSyncButton({ moduleKey }: { moduleKey: string }) {
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<SyncResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +29,7 @@ export function ModuleSyncButton({ moduleKey }: { moduleKey: string }) {
         setResult(data);
       }
     } catch {
-      setError("Síťová chyba — synchronizace selhala.");
+      setError(t("moduleSyncButton.error.network"));
     } finally {
       setBusy(false);
     }
@@ -42,11 +44,11 @@ export function ModuleSyncButton({ moduleKey }: { moduleKey: string }) {
         className="inline-flex items-center gap-2 rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
       >
         <RefreshCw size={14} className={busy ? "animate-spin" : ""} />
-        {busy ? "Synchronizuji…" : "Synchronizovat vše"}
+        {busy ? t("moduleSyncButton.syncing") : t("moduleSyncButton.sync")}
       </button>
       {result && (
         <span className="text-sm text-emerald-400">
-          Hotovo — skripty: {result.scriptsSynced}, běhy: {result.runsSynced}
+          {t("moduleSyncButton.done", { scripts: result.scriptsSynced, runs: result.runsSynced })}
         </span>
       )}
       {error && <span className="text-sm text-red-400">{error}</span>}

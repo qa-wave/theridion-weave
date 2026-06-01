@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { useT } from "@/lib/i18n/context";
 
 const input =
   "w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]";
@@ -9,6 +10,7 @@ const labelCls = "mb-1 block text-xs font-medium text-[var(--muted)]";
 
 export function ScriptForm() {
   const router = useRouter();
+  const t = useT();
   const [name, setName] = useState("");
   const [product, setProduct] = useState("eyes");
   const [framework, setFramework] = useState("");
@@ -40,7 +42,7 @@ export function ScriptForm() {
     setSaving(false);
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      setError((body as { error?: string }).error ?? "Uložení selhalo");
+      setError((body as { error?: string }).error ?? t("scriptForm.error.default"));
       return;
     }
     const created = (await res.json()) as { id: string };
@@ -51,35 +53,35 @@ export function ScriptForm() {
   return (
     <form onSubmit={submit} className="space-y-5">
       <div>
-        <label className={labelCls}>Název *</label>
+        <label className={labelCls}>{t("scriptForm.name")}</label>
         <input className={input} value={name} onChange={(e) => setName(e.target.value)} required placeholder="Auth login spec" />
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className={labelCls}>Produkt *</label>
+          <label className={labelCls}>{t("scriptForm.product")}</label>
           <select className={input} value={product} onChange={(e) => setProduct(e.target.value)}>
             <option value="eyes">Eyes (FE)</option>
             <option value="net">Net (BE)</option>
           </select>
         </div>
         <div>
-          <label className={labelCls}>Framework *</label>
+          <label className={labelCls}>{t("scriptForm.framework")}</label>
           <input className={input} value={framework} onChange={(e) => setFramework(e.target.value)} required placeholder="Playwright" />
         </div>
         <div>
-          <label className={labelCls}>Spec path</label>
+          <label className={labelCls}>{t("scriptForm.specPath")}</label>
           <input className={input} value={specPath} onChange={(e) => setSpecPath(e.target.value)} placeholder="playwright/auth.spec.ts" />
         </div>
         <div>
-          <label className={labelCls}>Case key</label>
+          <label className={labelCls}>{t("scriptForm.caseKey")}</label>
           <input className={input} value={caseKey} onChange={(e) => setCaseKey(e.target.value)} placeholder="auth.login.happy-path" />
         </div>
         <div>
-          <label className={labelCls}>Owner *</label>
+          <label className={labelCls}>{t("scriptForm.owner")}</label>
           <input className={input} value={owner} onChange={(e) => setOwner(e.target.value)} required placeholder="qa@qawave.ai" />
         </div>
         <div>
-          <label className={labelCls}>Stav</label>
+          <label className={labelCls}>{t("scriptForm.status")}</label>
           <select className={input} value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="draft">draft</option>
             <option value="active">active</option>
@@ -97,7 +99,7 @@ export function ScriptForm() {
           disabled={saving}
           className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
         >
-          {saving ? "Ukládám…" : "Vytvořit skript"}
+          {saving ? t("scriptForm.submitting") : t("scriptForm.submit")}
         </button>
       </div>
     </form>

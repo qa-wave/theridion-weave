@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { ResultStatus } from "@/lib/types";
+import { useT } from "@/lib/i18n/context";
 
 const input =
   "w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)] disabled:opacity-40";
@@ -26,6 +27,7 @@ interface Props {
 
 export function ExecuteRunForm({ runId, testId, currentStatus, currentNotes, currentEvidence, disabled }: Props) {
   const router = useRouter();
+  const t = useT();
   const [isPending, startTransition] = useTransition();
   const [status, setStatus] = useState<ResultStatus>(currentStatus);
   const [notes, setNotes] = useState(currentNotes);
@@ -43,7 +45,7 @@ export function ExecuteRunForm({ runId, testId, currentStatus, currentNotes, cur
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      setError((body as { error?: string }).error ?? "Uložení selhalo");
+      setError((body as { error?: string }).error ?? t("executeRunForm.error.default"));
       return;
     }
     if (nextStatus) setStatus(nextStatus);
@@ -76,18 +78,18 @@ export function ExecuteRunForm({ runId, testId, currentStatus, currentNotes, cur
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
-          <label className={labelCls}>Poznámka</label>
+          <label className={labelCls}>{t("executeRunForm.notes")}</label>
           <input
             className={input}
             disabled={disabled}
             value={notes}
             onChange={(e) => { setNotes(e.target.value); setSaved(false); }}
             onBlur={() => save()}
-            placeholder="Volitelná poznámka k výsledku"
+            placeholder={t("executeRunForm.notes.placeholder")}
           />
         </div>
         <div>
-          <label className={labelCls}>Evidence URL</label>
+          <label className={labelCls}>{t("executeRunForm.evidence")}</label>
           <input
             className={input}
             disabled={disabled}
@@ -100,7 +102,7 @@ export function ExecuteRunForm({ runId, testId, currentStatus, currentNotes, cur
       </div>
 
       {error && <p className="text-xs text-red-400">{error}</p>}
-      {saved && <p className="text-xs text-emerald-400">Uloženo</p>}
+      {saved && <p className="text-xs text-emerald-400">{t("executeRunForm.saved")}</p>}
     </div>
   );
 }

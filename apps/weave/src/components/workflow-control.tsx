@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useT } from "@/lib/i18n/context";
 
 interface Props {
   apiPath: string; // e.g. "/api/scripts/scr-123"
@@ -14,13 +15,15 @@ interface Props {
 
 export function WorkflowControl({
   apiPath,
-  currentStatus,
+  currentStatus: _currentStatus,
   nextStates,
   statusField = "status",
   by = "user",
-  label = "Přejít na",
+  label,
 }: Props) {
   const router = useRouter();
+  const t = useT();
+  const resolvedLabel = label ?? t("workflow.goTo");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,7 +40,7 @@ export function WorkflowControl({
     setBusy(false);
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      setError((body as { error?: string }).error ?? "Přechod stavu selhal");
+      setError((body as { error?: string }).error ?? t("workflow.error.default"));
       return;
     }
     router.refresh();
@@ -45,7 +48,7 @@ export function WorkflowControl({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="text-xs text-[var(--muted)]">{label}:</span>
+      <span className="text-xs text-[var(--muted)]">{resolvedLabel}:</span>
       {nextStates.map((s) => (
         <button
           key={s}

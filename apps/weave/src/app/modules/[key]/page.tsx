@@ -6,30 +6,17 @@ import { listTestScripts, listTestRuns, getLastSeen } from "@/data/store";
 import { maskSettings } from "@/lib/integrations";
 import { PageHeader, Card, ScriptStatusBadge, SourceBadge } from "@/components/ui";
 import { ModuleSyncButton } from "./module-sync-button";
+import { getServerT, getLocale } from "@/lib/i18n/server";
 
 export const dynamic = "force-dynamic";
-
-/** Format an ISO timestamp as a short relative label. Module-level — pure at call-time. */
-function formatLastSeen(iso: string | null): string {
-  if (!iso) return "Nikdy";
-  const d = new Date(iso);
-  const now = new Date();
-  const diffMs = now.getTime() - d.getTime();
-  const diffMin = Math.round(diffMs / 60_000);
-  const diffHour = Math.round(diffMin / 60);
-  const diffDay = Math.round(diffHour / 24);
-  if (diffMin < 2) return "právě teď";
-  if (diffMin < 60) return `před ${diffMin} min`;
-  if (diffHour < 24) return `před ${diffHour} h`;
-  if (diffDay === 1) return "včera";
-  return `před ${diffDay} dny`;
-}
 
 interface Props {
   params: Promise<{ key: string }>;
 }
 
 export default async function ModulePage({ params }: Props) {
+  const t = await getServerT();
+  const locale = await getLocale();
   const { key } = await params;
 
   if (!isLocalModule(key as IntegrationKey)) notFound();
@@ -38,7 +25,6 @@ export default async function ModulePage({ params }: Props) {
   const settings = await loadSettings();
   const view = maskSettings(settings);
 
-  // Check that this module counts as connected under the new semantics.
   const connected = installedModules(view);
   if (!connected.includes(moduleKey)) notFound();
 
@@ -46,7 +32,6 @@ export default async function ModulePage({ params }: Props) {
   const meta = INTEGRATION_META[moduleKey];
   const ct = cfg.connectionType;
 
-  // Load scripts and runs for this module.
   const [scripts, runs, lastSeenRaw] = await Promise.all([
     listTestScripts({ product: moduleKey === "runner" ? "net" : (moduleKey as "eyes" | "net") }),
     listTestRuns(moduleKey as import("@/lib/types").RunSource),
@@ -56,12 +41,33 @@ export default async function ModulePage({ params }: Props) {
   ]);
 
   const recentRuns = runs.slice(0, 10);
-
-  // Build ingest endpoint hint for 'app' type.
   const ingestEndpoint = "/api/runs/ingest";
+
+  function formatLastSeen(iso: string | null): string {
+    if (!iso) return t("settings.lastSeen.never");
+    const d = new Date(iso);
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    const diffMin = Math.round(diffMs / 60_000);
+    const diffHour = Math.round(diffMin / 60);
+    const diffDay = Math.round(diffHour / 24);
+    if (diffMin < 2) return t("settings.lastSeen.justNow");
+    if (diffMin < 60) return t("settings.lastSeen.minutesAgo", { n: diffMin });
+    if (diffHour < 24) return t("settings.lastSeen.hoursAgo", { n: diffHour });
+    if (diffDay === 1) return t("settings.lastSeen.yesterday");
+    return t("settings.lastSeen.daysAgo", { n: diffDay });
+  }
 
   const lastSeenLabel = formatLastSeen(lastSeenRaw);
   const hasReceivedPush = !!lastSeenRaw;
+
+  const ctLabel = ct === "app"
+    ? t("settings.connection.app")
+    : ct === "service"
+    ? t("settings.connection.service")
+    : ct === "source"
+    ? t("settings.connection.source")
+    : "";
 
   return (
     <>
@@ -78,11 +84,11 @@ export default async function ModulePage({ params }: Props) {
               className={`inline-block h-2.5 w-2.5 rounded-full ${cfg.enabled ? "bg-emerald-400" : "bg-zinc-500"}`}
             />
             <span className="text-sm font-medium">
-              {cfg.enabled ? "Aktivní" : "Neaktivní"}
+              {cfg.enabled ? t("module.connection.active") : t("module.connection.inactive")}
             </span>
             {ct && (
               <span className="rounded-full border border-[var(--border)] px-2 py-0.5 text-xs text-[var(--muted)]">
-                {ct === "app" ? "Desktop aplikace" : ct === "service" ? "Služba (URL)" : "Ze zdrojáku"}
+                {ctLabel}
               </span>
             )}
           </div>
@@ -96,28 +102,28 @@ export default async function ModulePage({ params }: Props) {
                 />
                 <span className="text-sm">
                   {hasReceivedPush
-                    ? `Připojeno (přijímá push) — naposledy: ${lastSeenLabel}`
-                    : "Čeká na první výsledek z aplikace"}
+                    ? t("module.connection.awaitingPush", { lastSeen: lastSeenLabel })
+                    : t("module.connection.firstResult")}
                 </span>
               </div>
               <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-xs">
-                <p className="mb-1 font-medium text-[var(--muted)]">Ingest endpoint</p>
+                <p className="mb-1 font-medium text-[var(--muted)]">{t("module.connection.ingestEndpoint")}</p>
                 <code className="font-mono text-[var(--foreground)]">{ingestEndpoint}</code>
               </div>
               {cfg.dataDir && (
-                <p className="text-xs text-[var(--muted)]">Datová složka: {cfg.dataDir}</p>
+                <p className="text-xs text-[var(--muted)]">{t("module.connection.dataDir")}{cfg.dataDir}</p>
               )}
             </div>
           )}
 
           {/* service type: show baseUrl */}
           {ct === "service" && cfg.baseUrl && (
-            <p className="text-xs text-[var(--muted)]">Base URL: {cfg.baseUrl}</p>
+            <p className="text-xs text-[var(--muted)]">{t("module.connection.baseUrl")}{cfg.baseUrl}</p>
           )}
 
           {/* source type: show installPath */}
           {(ct === "source" || (!ct && cfg.installPath)) && cfg.installPath && (
-            <p className="text-xs text-[var(--muted)]">Cesta ke zdrojáku: {cfg.installPath}</p>
+            <p className="text-xs text-[var(--muted)]">{t("module.connection.sourcePath")}{cfg.installPath}</p>
           )}
         </div>
       </Card>
@@ -130,22 +136,22 @@ export default async function ModulePage({ params }: Props) {
       {/* Scripts synced from this module */}
       <section className="mb-8">
         <h2 className="mb-3 text-lg font-semibold">
-          Synchronizované skripty ({scripts.length})
+          {t("module.scripts.title")} ({scripts.length})
         </h2>
         {scripts.length === 0 ? (
           <p className="text-sm text-[var(--muted)]">
             {ct === "app"
-              ? "Žádné skripty. Spusť \"Synchronizovat vše\" pro import exportovaných specifikací z datové složky (pokud je nastavena)."
-              : "Žádné skripty. Spusť \"Synchronizovat vše\" pro import spec souborů z modulu."}
+              ? t("module.scripts.empty.app")
+              : t("module.scripts.empty.default")}
           </p>
         ) : (
           <div className="overflow-hidden rounded-xl border border-[var(--border)]">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[var(--border)] bg-[var(--surface-2)]">
-                  <th className="px-4 py-2 text-left font-medium text-[var(--muted)]">Název</th>
-                  <th className="px-4 py-2 text-left font-medium text-[var(--muted)]">Cesta</th>
-                  <th className="px-4 py-2 text-left font-medium text-[var(--muted)]">Status</th>
+                  <th className="px-4 py-2 text-left font-medium text-[var(--muted)]">{t("module.scripts.col.name")}</th>
+                  <th className="px-4 py-2 text-left font-medium text-[var(--muted)]">{t("module.scripts.col.path")}</th>
+                  <th className="px-4 py-2 text-left font-medium text-[var(--muted)]">{t("module.scripts.col.status")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -169,23 +175,23 @@ export default async function ModulePage({ params }: Props) {
       {/* Recent runs */}
       <section>
         <h2 className="mb-3 text-lg font-semibold">
-          Poslední běhy z modulu ({recentRuns.length})
+          {t("module.runs.title")} ({recentRuns.length})
         </h2>
         {recentRuns.length === 0 ? (
           <p className="text-sm text-[var(--muted)]">
             {ct === "app"
-              ? "Žádné záznamy. Aplikace posílá výsledky automaticky přes push — výsledky se zobrazí zde."
-              : "Žádné záznamy o běhu."}
+              ? t("module.runs.empty.app")
+              : t("module.runs.empty.default")}
           </p>
         ) : (
           <div className="overflow-hidden rounded-xl border border-[var(--border)]">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[var(--border)] bg-[var(--surface-2)]">
-                  <th className="px-4 py-2 text-left font-medium text-[var(--muted)]">Suite</th>
-                  <th className="px-4 py-2 text-left font-medium text-[var(--muted)]">Zdroj</th>
-                  <th className="px-4 py-2 text-left font-medium text-[var(--muted)]">Spuštěno</th>
-                  <th className="px-4 py-2 text-right font-medium text-[var(--muted)]">Výsledky</th>
+                  <th className="px-4 py-2 text-left font-medium text-[var(--muted)]">{t("module.runs.col.suite")}</th>
+                  <th className="px-4 py-2 text-left font-medium text-[var(--muted)]">{t("module.runs.col.source")}</th>
+                  <th className="px-4 py-2 text-left font-medium text-[var(--muted)]">{t("module.runs.col.started")}</th>
+                  <th className="px-4 py-2 text-right font-medium text-[var(--muted)]">{t("module.runs.col.results")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -200,14 +206,14 @@ export default async function ModulePage({ params }: Props) {
                         <SourceBadge source={run.source} />
                       </td>
                       <td className="px-4 py-2 text-xs text-[var(--muted)]">
-                        {new Date(run.startedAt).toLocaleString("cs-CZ")}
+                        {new Date(run.startedAt).toLocaleString(locale === "cs" ? "cs-CZ" : "en-GB")}
                       </td>
                       <td className="px-4 py-2 text-right text-xs">
                         <span className="text-emerald-400">{pass}P</span>
                         {" / "}
                         <span className="text-red-400">{fail}F</span>
                         {" / "}
-                        <span className="text-[var(--muted)]">{total} celkem</span>
+                        <span className="text-[var(--muted)]">{total} {t("module.runs.total")}</span>
                       </td>
                     </tr>
                   );

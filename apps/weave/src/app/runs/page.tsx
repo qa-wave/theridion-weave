@@ -4,6 +4,7 @@ import { listTestRuns } from "@/data/store";
 import { summariseRun } from "@/lib/utils";
 import { Card, PageHeader, ResultBadge, SourceBadge } from "@/components/ui";
 import { formatDateTime, formatDuration, formatPercent } from "@/lib/utils";
+import { getServerT } from "@/lib/i18n/server";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,7 @@ interface SearchParams {
 }
 
 export default async function RunsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const t = await getServerT();
   const sp = await searchParams;
   const source =
     sp.source === "eyes" || sp.source === "net" || sp.source === "manual" || sp.source === "runner" ? sp.source : undefined;
@@ -20,8 +22,8 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
   return (
     <>
       <PageHeader
-        title="Běhy"
-        description="Sloučený pohled na manuální běhy a automatizované výsledky z Eyes (FE) a Net (BE)."
+        title={t("runs.title")}
+        description={t("runs.description")}
         action={
           <div className="flex items-center gap-2">
             <a
@@ -35,14 +37,14 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
               href="/runs/new"
               className="flex items-center gap-2 rounded-lg bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white hover:opacity-90"
             >
-              <Plus size={16} /> Nový běh
+              <Plus size={16} /> {t("runs.new")}
             </Link>
           </div>
         }
       />
 
       <div className="mb-4 flex gap-2 text-xs">
-        <SourceFilter value={undefined} current={source} label="Vše" />
+        <SourceFilter value={undefined} current={source} label={t("runs.filter.all")} />
         <SourceFilter value="manual" current={source} label="Manual" />
         <SourceFilter value="eyes" current={source} label="Eyes" />
         <SourceFilter value="net" current={source} label="Net" />
@@ -52,7 +54,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
       <div className="space-y-4">
         {runs.length === 0 && (
           <Card className="py-10 text-center text-sm text-[var(--muted)]">
-            Zatím žádné běhy. Spusť testy v Eyes/Net a nasměruj Runner na <code>/api/runs/ingest</code>, nebo přidej manuální běh přes API.
+            {t("runs.empty")}
           </Card>
         )}
         {runs.map((run) => {
@@ -67,7 +69,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
                   {run.suiteName && <span className="text-xs text-[var(--muted)]">{run.suiteName}</span>}
                   {inProgress && (
                     <span className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-300">
-                      probíhá
+                      {t("runs.inProgress")}
                     </span>
                   )}
                 </div>
@@ -77,7 +79,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
                       href={`/runs/${run.id}/execute`}
                       className="rounded-md bg-[var(--accent)] px-2 py-1 text-xs font-medium text-white hover:opacity-90"
                     >
-                      Pokračovat
+                      {t("runs.continue")}
                     </Link>
                   )}
                   <span>pass {formatPercent(s.passRate, 0)}</span>

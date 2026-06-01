@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Requirement, TestCase } from "@/lib/types";
+import { useT } from "@/lib/i18n/context";
 
 interface Props {
   allCases: TestCase[];
@@ -11,6 +12,7 @@ interface Props {
 
 export function RequirementForm({ allCases, initial }: Props) {
   const router = useRouter();
+  const t = useT();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,7 +41,7 @@ export function RequirementForm({ allCases, initial }: Props) {
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error ?? `Chyba ${res.status}`);
+        throw new Error(data.error ?? `Error ${res.status}`);
       }
       router.push("/requirements");
       router.refresh();
@@ -59,7 +61,7 @@ export function RequirementForm({ allCases, initial }: Props) {
       )}
 
       <div className="space-y-1">
-        <label className="text-sm font-medium" htmlFor="req-title">Název *</label>
+        <label className="text-sm font-medium" htmlFor="req-title">{t("requirementForm.name")}</label>
         <input
           id="req-title"
           value={title}
@@ -67,25 +69,25 @@ export function RequirementForm({ allCases, initial }: Props) {
           required
           maxLength={300}
           className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-          placeholder="Krátký popis požadavku"
+          placeholder={t("requirementForm.name.placeholder")}
         />
       </div>
 
       <div className="space-y-1">
-        <label className="text-sm font-medium" htmlFor="req-desc">Popis</label>
+        <label className="text-sm font-medium" htmlFor="req-desc">{t("requirementForm.description")}</label>
         <textarea
           id="req-desc"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           rows={3}
           className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-          placeholder="Volitelný detailní popis"
+          placeholder={t("requirementForm.description.placeholder")}
         />
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1">
-          <label className="text-sm font-medium" htmlFor="req-priority">Priorita</label>
+          <label className="text-sm font-medium" htmlFor="req-priority">{t("requirementForm.priority")}</label>
           <select
             id="req-priority"
             value={priority}
@@ -99,27 +101,23 @@ export function RequirementForm({ allCases, initial }: Props) {
         </div>
 
         <div className="space-y-1">
-          <label className="text-sm font-medium" htmlFor="req-status">Stav</label>
+          <label className="text-sm font-medium" htmlFor="req-status">{t("requirementForm.status")}</label>
           <select
             id="req-status"
             value={status}
             onChange={(e) => setStatus(e.target.value as Requirement["status"])}
             className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
           >
-            {[
-              { value: "open", label: "Otevřeno" },
-              { value: "in_progress", label: "Probíhá" },
-              { value: "done", label: "Hotovo" },
-              { value: "deprecated", label: "Zastaralé" },
-            ].map(({ value, label }) => (
-              <option key={value} value={value}>{label}</option>
-            ))}
+            <option value="open">{t("requirementForm.status.open")}</option>
+            <option value="in_progress">{t("requirementForm.status.in_progress")}</option>
+            <option value="done">{t("requirementForm.status.done")}</option>
+            <option value="deprecated">{t("requirementForm.status.deprecated")}</option>
           </select>
         </div>
       </div>
 
       <div className="space-y-1">
-        <label className="text-sm font-medium" htmlFor="req-url">Tracker URL (Jira, Linear, GitHub…)</label>
+        <label className="text-sm font-medium" htmlFor="req-url">{t("requirementForm.trackerUrl")}</label>
         <input
           id="req-url"
           type="url"
@@ -131,10 +129,10 @@ export function RequirementForm({ allCases, initial }: Props) {
       </div>
 
       <div className="space-y-2">
-        <p className="text-sm font-medium">Propojené test cases ({caseIds.length} vybráno)</p>
+        <p className="text-sm font-medium">{t("requirementForm.linkedCases")} ({caseIds.length} selected)</p>
         <div className="max-h-64 overflow-y-auto space-y-1 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2">
           {allCases.length === 0 && (
-            <p className="px-2 py-1 text-sm text-[var(--muted)]">Žádné test cases.</p>
+            <p className="px-2 py-1 text-sm text-[var(--muted)]">{t("requirementForm.linkedCases.empty")}</p>
           )}
           {allCases.map((c) => (
             <label
@@ -160,14 +158,14 @@ export function RequirementForm({ allCases, initial }: Props) {
           disabled={saving}
           className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
         >
-          {saving ? "Ukládám…" : initial?.id ? "Uložit změny" : "Vytvořit požadavek"}
+          {saving ? t("requirementForm.submitting") : initial?.id ? t("requirementForm.submit.save") : t("requirementForm.submit.create")}
         </button>
         <button
           type="button"
           onClick={() => router.back()}
           className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--surface-2)]"
         >
-          Zrušit
+          {t("requirementForm.cancel")}
         </button>
       </div>
     </form>
